@@ -39,6 +39,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'config.middleware.RequestLoggingMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -147,8 +149,49 @@ PROJECT_APPS = [
 ]
 
 THIRD_PARTY_APPS = [
-
+    'corsheaders',
+    'rest_framework',
+    'drf_yasg',
 ]
 
 
 INSTALLED_APPS = DJANGO_APPS + PROJECT_APPS + THIRD_PARTY_APPS
+
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {'type': 'apiKey', 'name': 'Authorization', 'in': 'header'}
+    },
+    'USE_SESSION_AUTH': False,
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '[{asctime}] {levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+            'level': 'INFO',
+        },
+        'error_file': {
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'errors.log',
+            'formatter': 'standard',
+            'level': 'WARNING',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'error_file'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'request_logger': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'error_logger': {'handlers': ['error_file'], 'level': 'WARNING', 'propagate': False},
+    },
+}
