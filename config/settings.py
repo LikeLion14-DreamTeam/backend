@@ -14,6 +14,9 @@ from pathlib import Path
 import os, json
 from django.core.exceptions import ImproperlyConfigured
 
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 # secret.json 파일을 열어서 SECRET_KEY를 가져오는 함수
 secret_file = os.path.join(BASE_DIR, 'secrets.json') 
 
@@ -29,9 +32,6 @@ def get_secret(setting, secrets=secrets):
         raise ImproperlyConfigured(error_msg)
 
 SECRET_KEY = get_secret("SECRET_KEY")
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 # Quick-start development settings - unsuitable for production
