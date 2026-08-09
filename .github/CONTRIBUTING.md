@@ -1,11 +1,13 @@
 ## 브랜치 전략
 
 - `main`: 배포 가능한 안정 브랜치. 직접 push 금지, PR로만 merge
+- `develop`: 개발 통합 브랜치. 모든 기능/수정이 먼저 여기로 모임. 직접 push 금지, PR로만 merge
 - `feature/{이슈번호}-{작업내용}`: 기능 개발 브랜치
   - 예: feature/12-login-api
 - `fix/{이슈번호}-{작업내용}`: 버그 수정 브랜치
   - 예: fix/20-cors-error
 - PR 필수, 팀원 1명 이상 리뷰 승인 후 Squash and merge, merge된 브랜치는 삭제
+- develop → main 머지는 일정 단위(주기적/기능 묶음 단위)로 진행
 
 ## 커밋 메시지 규칙
 
