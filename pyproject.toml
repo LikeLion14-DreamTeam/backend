@@ -11,8 +11,6 @@ dependencies = [
     "drf-yasg (>=1.21.15,<2.0.0)",
     "django-cors-headers (>=4.9.0,<5.0.0)",
     "mysqlclient (>=2.2.8,<3.0.0)",
-    "sshtunnel (>=0.4.0,<0.5.0)",
-    "paramiko (<3)"
 ]
 
 
