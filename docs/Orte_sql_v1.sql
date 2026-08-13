@@ -1,0 +1,175 @@
+CREATE TABLE `PHOTO` (
+	`photo_id`	INT	NOT NULL,
+	`pin_id`	INT	NULL,
+	`captured_at`	DATETIME	NULL,
+	`latitude`	DECIMAL(10,6)	NULL,
+	`longitude`	DECIMAL(10,6)	NULL,
+	`source_type`	VARCHAR(30)	NULL,
+	`photo_url`	VARCHAR(500)	NULL,
+	`is_main`	BOOLEAN	NULL
+);
+
+CREATE TABLE `TASTE_PROFILE_AXIS` (
+	`axis_code`	VARCHAR(50)	NOT NULL,
+	`user_id`	INT	NOT NULL,
+	`value`	INT	NULL,
+	`status`	ENUM('REFLECTED','PENDING')	NULL
+);
+
+CREATE TABLE `USER` (
+	`user_id`	INT	NOT NULL,
+	`email`	VARCHAR(150)	NULL,
+	`created_at`	DATETIME	NULL,
+	`onboarding_completed`	BOOLEAN	NULL,
+	`permission_intro_shown`	BOOLEAN	NULL,
+	`account_identifier`	VARCHAR(150)	NULL
+);
+
+CREATE TABLE `PIN` (
+	`pin_id`	INT	NOT NULL,
+	`segment_id`	INT	NULL,
+	`photobook_id`	INT	NULL,
+	`latitude`	DECIMAL(10,6)	NULL,
+	`longitude`	DECIMAL(10,6)	NULL,
+	`address`	VARCHAR(300)	NULL,
+	`place_name`	VARCHAR(150)	NULL,
+	`tagged_at`	DATETIME	NULL,
+	`text_note`	VARCHAR(500)	NULL,
+	`saved_at`	DATETIME	NULL,
+	`city`	VARCHAR(100)	NULL,
+	`included_in_segment`	BOOLEAN	NOT NULL	DEFAULT TRUE
+);
+
+CREATE TABLE `PHOTOBOOK` (
+	`photobook_id`	INT	NOT NULL,
+	`segment_id`	INT	NOT NULL,
+	`cover_photo_id`	INT	NULL,
+	`title`	VARCHAR(100)	NULL,
+	`generated_at`	DATETIME	NULL
+);
+
+CREATE TABLE `BASIC_QUESTION_RESPONSE` (
+	`response_id`	INT	NOT NULL,
+	`user_id`	INT	NULL,
+	`round_no`	INT	NULL,
+	`answer`	VARCHAR(100)	NULL,
+	`answered_at`	DATETIME	NULL
+);
+
+CREATE TABLE `TRAVEL_SEGMENT` (
+	`segment_id`	INT	NOT NULL,
+	`user_id`	INT	NULL,
+	`name`	VARCHAR(100)	NULL,
+	`start_at`	DATETIME	NULL,
+	`end_at`	DATETIME	NULL,
+	`status`	BOOLEAN	NULL,
+	`cover_photo_url`	VARCHAR(500)	NULL
+);
+
+CREATE TABLE `MCM_PRODUCT` (
+	`tag_id`	VARCHAR(100)	NOT NULL,
+	`user_id`	INT	NULL,
+	`product_type`	VARCHAR(30)	NULL,
+	`product_name`	VARCHAR(100)	NULL,
+	`registered_at`	DATETIME	NULL,
+	`tag_count`	INT	NULL,
+	`unlinked_at`	DATETIME	NULL
+);
+
+CREATE TABLE `COUNTRY_STAMP` (
+	`country_code`	INT	NOT NULL,
+	`user_id`	INT	NOT NULL,
+	`country_name`	VARCHAR(50)	NULL
+);
+
+CREATE TABLE `TASTE_PROFILE` (
+	`user_id`	INT	NOT NULL,
+	`last_updated_at`	DATETIME	NULL,
+	`taste`	TEXT	NULL
+);
+
+CREATE TABLE `SELECTION_PHOTO` (
+	`selection_photo_id`	INT	NOT NULL,
+	`user_id`	INT	NULL,
+	`round_no`	INT	NULL,
+	`status`	BOOLEAN	NULL,
+	`selected_at`	DATETIME	NULL
+);
+
+CREATE TABLE `VOICE_MEMO` (
+	`voice_memo_id`	INT	NOT NULL,
+	`pin_id`	INT	NOT NULL,
+	`audio_url`	VARCHAR(255)	NULL,
+	`saved_at`	DATETIME	NULL
+);
+
+ALTER TABLE `PHOTO` ADD CONSTRAINT `PK_PHOTO` PRIMARY KEY (
+	`photo_id`
+);
+
+ALTER TABLE `TASTE_PROFILE_AXIS` ADD CONSTRAINT `PK_TASTE_PROFILE_AXIS` PRIMARY KEY (
+	`axis_code`,
+	`user_id`
+);
+
+ALTER TABLE `USER` ADD CONSTRAINT `PK_USER` PRIMARY KEY (
+	`user_id`
+);
+
+ALTER TABLE `PIN` ADD CONSTRAINT `PK_PIN` PRIMARY KEY (
+	`pin_id`
+);
+
+ALTER TABLE `PHOTOBOOK` ADD CONSTRAINT `PK_PHOTOBOOK` PRIMARY KEY (
+	`photobook_id`
+);
+
+ALTER TABLE `BASIC_QUESTION_RESPONSE` ADD CONSTRAINT `PK_BASIC_QUESTION_RESPONSE` PRIMARY KEY (
+	`response_id`
+);
+
+ALTER TABLE `TRAVEL_SEGMENT` ADD CONSTRAINT `PK_TRAVEL_SEGMENT` PRIMARY KEY (
+	`segment_id`
+);
+
+ALTER TABLE `MCM_PRODUCT` ADD CONSTRAINT `PK_MCM_PRODUCT` PRIMARY KEY (
+	`tag_id`
+);
+
+ALTER TABLE `COUNTRY_STAMP` ADD CONSTRAINT `PK_COUNTRY_STAMP` PRIMARY KEY (
+	`country_code`,
+	`user_id`
+);
+
+ALTER TABLE `TASTE_PROFILE` ADD CONSTRAINT `PK_TASTE_PROFILE` PRIMARY KEY (
+	`user_id`
+);
+
+ALTER TABLE `SELECTION_PHOTO` ADD CONSTRAINT `PK_SELECTION_PHOTO` PRIMARY KEY (
+	`selection_photo_id`
+);
+
+ALTER TABLE `VOICE_MEMO` ADD CONSTRAINT `PK_VOICE_MEMO` PRIMARY KEY (
+	`voice_memo_id`
+);
+
+ALTER TABLE `TASTE_PROFILE_AXIS` ADD CONSTRAINT `FK_USER_TO_TASTE_PROFILE_AXIS_1` FOREIGN KEY (
+	`user_id`
+)
+REFERENCES `USER` (
+	`user_id`
+);
+
+ALTER TABLE `COUNTRY_STAMP` ADD CONSTRAINT `FK_USER_TO_COUNTRY_STAMP_1` FOREIGN KEY (
+	`user_id`
+)
+REFERENCES `USER` (
+	`user_id`
+);
+
+ALTER TABLE `TASTE_PROFILE` ADD CONSTRAINT `FK_USER_TO_TASTE_PROFILE_1` FOREIGN KEY (
+	`user_id`
+)
+REFERENCES `USER` (
+	`user_id`
+);
