@@ -12,12 +12,13 @@ services:
     environment:
       # 아래 값은 secrets.json과 반드시 일치해야 함 (DB_NAME, DB_PW)
       # root 계정만 사용하는 구조 — 별도 앱 유저는 만들지 않음
-      MYSQL_ROOT_PASSWORD: "0309"
-      MYSQL_DATABASE: mcm_nfc
+      # 실제 값은 .env 파일에서 주입 (.env.example 참고)
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE}"
     volumes:
       - mcm_nfc_mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p0309"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
       timeout: 5s
       retries: 10
