@@ -1,0 +1,27 @@
+services:
+  mysql:
+    image: mysql:8.4
+    # 배포 환경(RDS)이 8.4.1이라 8.4 마이너 라인으로 맞춤.
+    # 패치 버전까지 완전히 고정하고 싶으면 mysql:8.4.1로 바꿀 것.
+    container_name: mcm_nfc_mysql
+    restart: unless-stopped
+    ports:
+      # 호스트 3307 → 컨테이너 3306
+      # secrets.json의 DB_PORT 값(3307)과 반드시 일치해야 함
+      - "3307:3306"
+    environment:
+      # 아래 값은 secrets.json과 반드시 일치해야 함 (DB_NAME, DB_PW)
+      # root 계정만 사용하는 구조 — 별도 앱 유저는 만들지 않음
+      # 실제 값은 .env 파일에서 주입 (.env.example 참고)
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE}"
+    volumes:
+      - mcm_nfc_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mcm_nfc_mysql_data:
