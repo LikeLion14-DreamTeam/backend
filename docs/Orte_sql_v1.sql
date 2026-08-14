@@ -109,6 +109,7 @@ CREATE TABLE `MCM_PRODUCT` (
 );
 
 -- TRAVEL_SEGMENT.status, cover_photo_url: 존치 여부 팀 내 논의 중(보류)
+-- TRAVEL_SEGMENT.dates_manually_set: 4.3(구간 편집) 날짜 직접 선택 반영, 신규(2026-08-15)
 CREATE TABLE `TRAVEL_SEGMENT` (
 	`segment_id`	INT	NOT NULL,
 	`user_id`	INT	NULL,
@@ -116,7 +117,8 @@ CREATE TABLE `TRAVEL_SEGMENT` (
 	`start_at`	DATETIME	NULL,
 	`end_at`	DATETIME	NULL,
 	`status`	BOOLEAN	NULL,
-	`cover_photo_url`	VARCHAR(500)	NULL
+	`cover_photo_url`	VARCHAR(500)	NULL,
+	`dates_manually_set`	BOOLEAN	NOT NULL DEFAULT FALSE
 );
 
 -- PHOTOBOOK.cover_photo_id: 포토북 커버 사진 참조(신규)
