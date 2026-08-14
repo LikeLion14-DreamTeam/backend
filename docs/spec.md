@@ -23,7 +23,7 @@
 | MCM_PRODUCT PK 구성 | (구) 다이어그램상 `tag_id`+`user_id` 복합 PK | `tag_id` 단일 PK로 확정 (SQL export 기준) | ✅ 반영 완료 |
 | ERD의 FK 제약 누락 | SQL export엔 3개 FK만 존재 (TASTE_PROFILE_AXIS, COUNTRY_STAMP, TASTE_PROFILE → USER) | 다이어그램에 그려진 관계선은 전부 유효한 관계로 간주하고 Django `models.ForeignKey`로 구현. SQL 파일 자체는 최종 DDL이 아닌 설계 스냅샷으로 취급 | ✅ 반영 완료 |
 | 무드보드 1라운드 캐릭터 소재 | 원문에 언급 없음 (사진 페어/무드보드 소재 미지정) | 브랜드 톤 유지한 3D 마스코트 캐릭터(사자 또는 사람)로 확정, 프롬프트 별도 문서 관리 | ✅ 반영 완료 (구현과 무관, 에셋 결정) |
-| 마이페이지 슬라이더 축 개수 (재정정) | (구) 위 행에서 "6개 유지"로 정리했었음 | **5개로 정정.** 기본질문 5개·A/B 5쌍이 1:1로 검증하는 축(밝기·채도·색온도·구도와 밀도·선호 사진종류)만 슬라이더/축으로 사용. 별도 distance·angle 축은 만들지 않음 — taste 앱 모델 설계(#26) 중 확정 | ✅ 반영 완료 (2026-08-14) |
+| 마이페이지 슬라이더 축 개수 (재정정) | (구) 위 행에서 "6개 유지"로 정리했었음 | **5개로 정정.** 기본질문 5개·A/B 5쌍이 1:1로 검증하는 축(밝기·채도·색온도·구도와 밀도·사진종류)만 슬라이더/축으로 사용. 별도 distance·angle 축은 만들지 않음 — taste 앱 모델 설계(#26) 중 확정 | ✅ 반영 완료 (2026-08-14) |
 | 무드보드 2라운드 결과의 축 반영 방식 | 원문에 구체적 반영 방식 없음 | 무드보드 1라운드(캐릭터 각도·거리 9장 중 3장, 구도 선호)와 2라운드(여행사진 9장 중 3장, 선택 사진 분석)는 **모두 `density`(구도와 밀도) 축을 포함한 5개 축에 대한 추가 신호**로 반영. 별도 축을 새로 만들지 않고 기존 5축 체계에 신호만 더하는 구조 | ✅ 반영 완료 (2026-08-14) |
 
 > 검토 필요 항목이 새로 발견되면 이 표에 먼저 추가하고, 결정되면 상태를 ✅로 바꾸면서
@@ -155,15 +155,17 @@
 | 앱 | 담당 도메인 | 포함 모델 |
 |---|---|---|
 | accounts | 계정·인증 | User, Session |
-| taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, ABSelectionLog, ProfileRetrainHistory |
+| taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, SelectionPhoto, ProfileRetrainHistory |
 | recommendations | 추천 | RecommendationResult, RecommendationEdit, RecommendationRegenHistory |
 | products | NFC 제품 | NfcTag |
 | travel | 여행 기록 핵심 | TravelSegment, Pin, TaggingSession, Photo, VoiceMemo, CountryStamp |
 | photobooks | 포토북 | Photobook, PhotobookPin, PhotobookPhotoLayout |
 
-> 참고: `OnboardingProgress`, `ProfileRetrainHistory`, `ABSelectionLog`, `RecommendationResult`, `RecommendationEdit`,
+> 참고: `OnboardingProgress`, `ProfileRetrainHistory`, `RecommendationResult`, `RecommendationEdit`,
 > `RecommendationRegenHistory`는 ERD 다이어그램에는 아직 반영되지 않았고 기능명세서 데이터 항목 기준으로
 > taste/recommendations 앱에서 신규 설계가 필요함. 설계 확정 시 `docs/IMPLEMENTATION.md`에 필드 정의를 남길 것.
+> (`ABSelectionLog`는 검토 후 제외 확정 — `SelectionPhoto`가 A/B+무드보드 선택을 통합 관리. 2026-08-14,
+> `docs/IMPLEMENTATION.md` 결정 로그 참고)
 
 ### 온보딩 설문 구조 (2026.08 확정, 기능명세서보다 최신)
 

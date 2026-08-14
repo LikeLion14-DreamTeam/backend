@@ -24,7 +24,7 @@ Orte — NFC 태깅으로 여행 순간을 기록하고 취향 기반으로 사�
 | 앱 | 담당 도메인 | 주요 모델 |
 |---|---|---|
 | accounts | 계정·인증 | User, Session |
-| taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, ABSelectionLog, ProfileRetrainHistory |
+| taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, SelectionPhoto, ProfileRetrainHistory |
 | recommendations | 추천 | RecommendationResult, RecommendationEdit, RecommendationRegenHistory |
 | products | NFC 제품 | NfcTag |
 | travel | 여행 기록 핵심 | TravelSegment, Pin, TaggingSession, Photo, VoiceMemo, CountryStamp |

@@ -7,7 +7,7 @@ class AxisCode(models.TextChoices):
     VIVIDNESS = "vividness", "채도"
     TONE = "tone", "색온도"
     DENSITY = "density", "구도와 밀도"
-    PHOTO_TYPE = "photo_type", "선호 사진종류"
+    PHOTO_TYPE = "photo_type", "사진종류"
 
 
 class AxisStatus(models.TextChoices):
