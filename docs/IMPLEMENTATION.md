@@ -121,6 +121,26 @@
   로컬 마이그레이션 히스토리 재생성(0001로 스쿼시, 개발 중 데이터 없어 안전). taste API 구현 시
   `BasicQuestionResponse` 시리얼라이저에서 `answer` ↔ `response` 매핑 필요.
 
+### 2026-08-14 — TasteProfile.version 필드 추가하지 않기로 결정
+- **결정**: 기능명세서 7.2/7.3, 부록 스키마 변경표에 "취향 프로파일 버전을 저장, 재학습 시 1 증가"라고
+  명시돼 있었지만, **`TasteProfile`에 `version` 필드를 추가하지 않기로 확정**.
+- **이유**: version의 유일한 실사용처였던 "추천 결과에 적용 프로파일 버전 기록"이 API 명세서(더 최신/
+  최종 문서) 부록 B에서 "`PHOTO.is_pin_cover` 플래그로 단순화, 추천 이력·버전 관리 미보존"으로 이미
+  취소됨. 마이페이지 슬라이더 화면에도 버전 노출 없음. 기능명세서가 API 명세서보다 최신화가 덜 된
+  문서라는 점을 사용자가 확인 — 두 문서가 충돌하면 API 명세서를 우선한다는 원칙에 따라 제외.
+- **영향 범위**: `TasteProfile` 모델에 `version` 필드 없음 (ERD `TASTE_PROFILE`도 당연히 변경 없음).
+  나중에 실제로 프로파일 버전을 참조하는 기능이 부활하면 그때 다시 검토.
+
+### 2026-08-14 — ProfileRetrainHistory에서 이전 축 값 스냅샷 제거, started_at 추가
+- **결정**: `ProfileRetrainHistory.previous_axis_snapshot`(JSONField) 필드를 제거하고, 대신
+  `started_at`(재학습 시작 시각)을 추가. 최종 필드는 `user`, `started_at`, `completed_at`만 유지.
+- **이유**: 기능명세서 7.3 데이터 항목이 "재학습 이력에는 여행자 식별자, 시작 시각, 완료 시각을
+  저장하며 **이전 프로파일 값은 보관하지 않는다**"고 명시. `previous_axis_snapshot`은 감사/디버깅
+  목적으로 제가 임의로 추가했던 필드라 스펙과 직접 충돌 — 이력(시각) 자체는 저장하되 내용 스냅샷은
+  저장하지 않는 것으로 정정. `ProfileRetrainHistory`는 ERD에 없는 taste 앱 자체 신규 테이블이라
+  이 변경은 ERD와 무관(팀 공유 문서 변경 없음).
+- **영향 범위**: `taste/models.py`의 `ProfileRetrainHistory`. 로컬 마이그레이션 재생성.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

@@ -126,8 +126,8 @@ class ProfileRetrainHistory(models.Model):
         on_delete=models.CASCADE,
         related_name="profile_retrain_history",
     )
+    started_at = models.DateTimeField()
     completed_at = models.DateTimeField(auto_now_add=True)
-    previous_axis_snapshot = models.JSONField(null=True, blank=True)
 
     def __str__(self):
         return f"ProfileRetrainHistory(user={self.user_id}, completed_at={self.completed_at})"
