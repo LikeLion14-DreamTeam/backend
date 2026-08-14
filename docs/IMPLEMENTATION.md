@@ -70,6 +70,34 @@
 - **영향 범위**: taste/recommendations와 직접 관련 없으나(travel 앱 소관), 5.2.1 추천 스코어링 시 "핀 좌표"를 참조할 때
   이 기준(세션 GPS)을 신뢰하고 사용하면 됨.
 
+### 2026-08-14 — taste 앱 User FK는 우선 Django 기본 auth.User로
+- **결정**: `accounts` 앱과 커스텀 User 모델이 아직 없어서(AUTH_USER_MODEL 미설정), taste 앱의 모든 모델은
+  당장 `settings.AUTH_USER_MODEL`(현재는 Django 기본 `auth.User`)을 FK로 참조한다.
+- **이유**: accounts는 다른 담당자 영역이라 사전 협의 없이 만들 수 없음(CLAUDE.md). `settings.AUTH_USER_MODEL`
+  참조로 작성해두면 나중에 accounts가 커스텀 User로 바뀌어도 taste 쪽 모델 코드 수정이 필요 없음.
+- **영향 범위**: `taste` 앱 6개 모델(TasteProfile, TasteProfileAxis, BasicQuestionResponse, SelectionPhoto,
+  OnboardingProgress, ProfileRetrainHistory)의 user FK 전부.
+
+### 2026-08-14 — ABSelectionLog는 만들지 않음, SelectionPhoto가 A/B+무드보드 통합 관리
+- **결정**: 앱-모델 매핑표에 있던 `ABSelectionLog`는 별도로 만들지 않는다. ERD의 `SELECTION_PHOTO` 하나로
+  A/B 사진 쌍 선택(5라운드)과 무드보드 사진 선택(2라운드)을 모두 관리한다. `round_no`는 AB 1~5, 무드보드
+  이어서 6~7로 하나의 연속된 번호를 쓴다(ERD에 필드 추가 없이 라운드 구분 가능).
+- **이유**: SELECTION_PHOTO가 이미 "사진 선택" 이벤트 전반을 담당하는 테이블로 설계돼 있어, A/B용 로그
+  테이블을 별도로 두면 같은 개념(사진 선택 기록)이 두 테이블로 쪼개져 중복됨. AI 실측값은 로그 테이블 없이
+  A/B 라운드에서 선택된 사진을 즉시 분석해 `TasteProfileAxis.value`에 바로 반영하는 방식으로 처리.
+- **영향 범위**: `taste` 앱 모델 목록에서 `ABSelectionLog` 제외. `SelectionPhoto.round_no` 1~5=A/B,
+  6~7=무드보드로 애플리케이션 코드에서 해석(상수로 관리).
+
+### 2026-08-14 — 마이페이지 슬라이더/축 6개 → 5개로 정정, 무드보드는 축 값에 신호로만 기여
+- **결정**: `TasteProfileAxis.axis_code`는 5개(brightness, vividness, tone, density, photo_type)만 사용.
+  무드보드 1라운드(캐릭터 각도·거리 9장 중 3장, 구도 선호)와 2라운드(여행사진 9장 중 3장, 선택 사진 분석)는
+  별도 축(distance/angle 등)을 새로 만들지 않고, 둘 다 **`density`(구도와 밀도) 축을 포함한 기존 5축에 대한
+  추가 신호**로 반영한다.
+- **이유**: 기본질문 Q4가 이미 "구도/밀도"를 하나의 축으로 묶어서 다루고 있어, 무드보드의 구도 관련 신호를
+  같은 축에 합치는 게 개념적으로 일관됨. 축 체계를 5개로 유지하면서 신호 소스만 늘어나는 구조.
+- **영향 범위**: `docs/spec.md` 체크리스트에 새 행 추가로 반영. `TasteProfileAxis` 모델의 `axis_code` 선택지.
+  무드보드 분석 결과를 축에 반영하는 구체 로직(가중 평균 등)은 recommendations/taste API 구현 시점에 별도 결정.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

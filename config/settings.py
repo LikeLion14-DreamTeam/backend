@@ -149,7 +149,7 @@ DJANGO_APPS = [
 ]
 
 PROJECT_APPS = [
-
+    'taste',
 ]
 
 THIRD_PARTY_APPS = [
