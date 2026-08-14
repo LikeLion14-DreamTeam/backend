@@ -20,14 +20,13 @@
   `request.user`를 반환하도록 교체 (호출부 코드 변경 불필요하도록 설계됨).
 - **관련 이슈/커밋**: #28 (`taste/auth_temp.py` 최초 도입)
 
-### [ ] `open-clip-torch`(CLIP) 의존성 — Windows 긴 경로 제한으로 설치 보류
-- **임시로 한 것**: `poetry add open-clip-torch` 시도 시 PyTorch 배포 파일 중 하나의 경로가
-  Windows 기본 경로 길이 제한(260자)을 넘어 설치 실패(`[WinError 206]`). `opencv-python`,
-  `pillow`만 우선 추가된 상태.
-- **정식으로 교체할 조건**: Windows "긴 경로 이름 사용" 옵션을 관리자 권한으로 켜고(레지스트리
-  `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled=1`) 재부팅한 뒤 재시도.
-- **관련 이슈/커밋**: #37 (사진 카탈로그 작업 중 발견, 실제 CLIP 사용은 AI 실측 파이프라인
-  이슈에서 진행)
+### [ ] recommendations 앱 CLIP 런타임 배포 (미착수)
+- **임시로 한 것**: taste 온보딩 카탈로그는 정적 사전계산으로 CLIP 배포 부담을 없앴지만,
+  recommendations(5.2.1, 유저 업로드 사진 스코어링)는 사진이 매번 새로 올라와서 런타임에 CLIP을
+  실제로 돌려야 함 — 아직 recommendations 앱 자체가 미착수라 배포 방식도 미정.
+- **정식으로 교체할 조건**: recommendations 앱 착수 시 CLIP 가중치를 Docker 이미지에 미리
+  포함하거나 영구 볼륨으로 캐싱하는 방식을 배포 담당자와 정해야 함.
+- **관련 이슈/커밋**: 아직 이슈 없음 (`docs/IMPLEMENTATION.md` 2026-08-15 결정 로그 참고)
 
 ---
 
@@ -38,3 +37,11 @@
 - **정식으로 교체한 것**: `taste/photo_catalog/{photo_id}.jpg`(66장, 리사이즈·재압축)와
   `taste/photo_catalog_manifest.py`(라운드→세트→photo_id 매핑) 추가.
 - **완료**: #37, 2026-08-15
+
+### [x] `open-clip-torch`(CLIP) 의존성 — Windows 긴 경로 제한으로 설치 보류
+- **임시로 한 것**: `poetry add open-clip-torch` 시도 시 PyTorch 배포 파일 경로가 Windows 기본
+  경로 길이 제한(260자)을 넘어 설치 실패(`[WinError 206]`).
+- **정식으로 교체한 것**: Windows "긴 경로 이름 사용" 옵션 활성화 + 재부팅 후 재시도, 추가로
+  `requires-python`을 `>=3.12,<3.13`으로 좁혀 `torchvision` 버전 충돌도 함께 해결.
+  `open-clip-torch`, `torch`, `torchvision` 정상 설치·import 확인.
+- **완료**: 2026-08-15 (별도 이슈 없이 진행, 다음 측정 함수 이슈의 선행 작업)
