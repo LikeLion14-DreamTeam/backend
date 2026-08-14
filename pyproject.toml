@@ -8,11 +8,18 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "django (>=6.0.7,<7.0.0)",
+    "djangorestframework (>=3.15.0,<4.0.0)",
+    "djangorestframework-simplejwt (>=5.3.0,<6.0.0)",
     "drf-yasg (>=1.21.15,<2.0.0)",
     "django-cors-headers (>=4.9.0,<5.0.0)",
     "mysqlclient (>=2.2.8,<3.0.0)",
+    "requests (>=2.34.2,<3.0.0)",
+    "google-auth (>=2.35.0,<3.0.0)",
 ]
 
+[tool.poetry]
+# Django 프로젝트라 배포용 패키지로 빌드/설치할 필요가 없음 — 의존성 관리 용도로만 poetry 사용.
+package-mode = false
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
