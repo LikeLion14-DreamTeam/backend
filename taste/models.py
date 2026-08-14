@@ -76,6 +76,9 @@ class SelectionPhoto(models.Model):
     """
     round_no 1~5: A/B 선택 5라운드, round_no 6~7: 무드보드 2라운드
     (round-axis 매핑은 코드 상수로 관리, DB엔 axis_code 컬럼 없음 — ERD 그대로 유지)
+
+    photo_id는 라운드 내 순번이 아니라 고정 사진 카탈로그 전역에서 유일한 ID다
+    (API 명세서 2.2 예시 기준, 코드/설정에 박힌 정적 자산의 식별자).
     """
 
     user = models.ForeignKey(
@@ -84,15 +87,15 @@ class SelectionPhoto(models.Model):
         related_name="selection_photos",
     )
     round_no = models.PositiveSmallIntegerField()
-    photo_index = models.PositiveSmallIntegerField()
+    photo_id = models.PositiveIntegerField()
     status = models.BooleanField()
     selected_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = [("user", "round_no", "photo_index")]
+        unique_together = [("user", "round_no", "photo_id")]
 
     def __str__(self):
-        return f"SelectionPhoto(user={self.user_id}, round={self.round_no}, photo={self.photo_index})"
+        return f"SelectionPhoto(user={self.user_id}, round={self.round_no}, photo={self.photo_id})"
 
 
 class OnboardingProgress(models.Model):

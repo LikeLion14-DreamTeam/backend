@@ -98,6 +98,29 @@
 - **영향 범위**: `docs/spec.md` 체크리스트에 새 행 추가로 반영. `TasteProfileAxis` 모델의 `axis_code` 선택지.
   무드보드 분석 결과를 축에 반영하는 구체 로직(가중 평균 등)은 recommendations/taste API 구현 시점에 별도 결정.
 
+### 2026-08-14 — API 명세서(`docs/Orte_API_명세서.md`) 신규 추가, 파일명 정리
+- **결정**: 기존 `docs/Orte_API_명세서_v1.md`(빈 파일)는 사실 "기능명세서" 내용을 담기로 했던 파일이라
+  `docs/Orte_기능명세서_v1.md`로 이름을 바꾸고, 실제 API 엔드포인트 명세는 새 파일
+  `docs/Orte_API_명세서.md`에 정리한다. `docs/spec.md` 내 파일명 참조도 함께 갱신.
+- **이유**: "API 명세서"라는 이름의 파일에 기능명세서 내용이 들어가는 건 혼동 소지가 있어 분리.
+- **영향 범위**: `docs/spec.md`의 파일명 참조 5곳.
+
+### 2026-08-14 — API 명세서 기준으로 축 5개 재확인, 필드명 정합화
+- **결정**: 새로 채워진 `docs/Orte_API_명세서.md`의 2.4(취향 축 목록 조회) 예시가 최초엔 6개 축
+  (brightness/vividness/tone/density/framing/angle)으로 적혀 있었으나, 사용자 확인 후 **5개 축
+  (brightness/vividness/tone/density/photo_type)이 맞는 것으로 확정** — API 명세서 예시 쪽을 수정.
+  필드명은 반대로 API 명세서 쪽이 기준: `BasicQuestionResponse`는 API 응답 키가 `response`이지만
+  ERD(SQL)의 실제 컬럼명이 `answer`라서 **모델 필드명은 ERD 그대로 `answer` 유지, 시리얼라이저에서
+  `response`로 노출**하는 방식으로 처리. `SelectionPhoto.photo_index`(라운드 내 0~8)는 ERD에 없는
+  자체 추가 필드였으므로 API 명세서 예시(`"photo_id": 2011`)를 따라 **`photo_id`로 이름 변경,
+  의미도 "라운드 내 순번"이 아니라 "고정 사진 카탈로그 전역 유일 ID"로 정정**.
+- **이유**: ERD(SQL)는 다른 개발자와 합의된 문서라 필드명을 임의로 바꾸지 않는 원칙 유지. API 응답
+  바디 키는 시리얼라이저 레벨에서 얼마든지 다르게 노출 가능하므로 ERD를 건드릴 필요가 없음.
+  `photo_id`는 ERD에 없던 필드라 API 명세서 기준으로 자유롭게 맞춤.
+- **영향 범위**: `taste/models.py`의 `SelectionPhoto.photo_id`(구 `photo_index`), `unique_together`.
+  로컬 마이그레이션 히스토리 재생성(0001로 스쿼시, 개발 중 데이터 없어 안전). taste API 구현 시
+  `BasicQuestionResponse` 시리얼라이저에서 `answer` ↔ `response` 매핑 필요.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
