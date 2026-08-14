@@ -324,6 +324,34 @@
 - **미확정**: recommendations의 정확한 배포 방식(Docker 이미지에 가중치 포함 vs 영구 볼륨)은
   실제 배포 인프라 담당자와 착수 시점에 논의 필요.
 
+### 2026-08-15 — 사진 실측 함수 구현 및 사전계산 완료 (#39)
+- **결정**: `taste/photo_measurement.py`에 5개 축 측정 함수 구현.
+  - brightness/vividness/tone: HSV V·S채널 평균, R−B 채널차 (순수 픽셀 계산, AI 아님)
+  - density: CLIP 제로샷(영어 프롬프트) + Canny 엣지 밀도 50:50 가중 평균
+  - photo_type: 얼굴 DNN(SSD+ResNet, `res10_300x300_ssd_iter_140000.caffemodel`) + 전신/상반신
+    Haar cascade 조합 — 셋 중 하나라도 사람을 감지하면 인물 쪽 점수
+  - `taste/dnn_models/`에 얼굴 검출 모델 파일 2개(약 10MB) 추가(OpenCV 공식 GitHub에서 받음)
+  - `taste/management/commands/precompute_photo_measurements.py` 신규: 카탈로그 66장 전체를
+    측정해 `taste/photo_measurements.py`(정적 데이터)로 저장하는 1회성 개발자 커맨드. 실행 완료.
+  - 테스트는 `photo_measurements.py`(정적 데이터)만 검증 — CLIP/torch를 테스트 시점에 다시
+    돌리지 않아 빠름(15개 테스트 0.014초). A/B 라운드는 참조값(20/80) 대비 방향성만 검증.
+- **이유**: 초기 구현(HOG 사람 감지, 한국어 CLIP 프롬프트, CLIP 단독 density)을 66장 카탈로그로
+  실측 검증한 결과 photo_type이 전부 미검출(10.0 고정), density 신호가 거의 없었음(60.8 vs 62.0).
+  마침 팀원이 2026-08-11에 실제 여행 사진 40장으로 CLIP 단독 vs 하이브리드(규칙기반+DNN 얼굴
+  검출+Haar 전신/상반신+CLIP 구도) 방식을 미리 비교 검증해둔 문서가 있어 그 결론을 그대로 채택.
+  Haar cascade 얼굴 검출 단독은 반복 패턴(키패드 등)을 얼굴로 오탐하는 사례가 실측으로 확인되어
+  DNN으로 교체된 이력이 있음. 이 교체 후 재검증하니 density가 20.8 vs 67.8로, photo_type이
+  15.0 vs 47.6으로 개선되어 5개 축 전부 방향성 테스트를 통과함.
+- **영향 범위**: `taste/photo_measurement.py`(신규), `taste/dnn_models/`(신규, 모델 파일 2개),
+  `taste/management/commands/precompute_photo_measurements.py`(신규), `taste/photo_measurements.py`
+  (신규, 사전계산 결과), `taste/tests.py`(`PhotoMeasurementsTests` 추가), `pyproject.toml`
+  (`opencv-python`을 5.0→4.x로 다운그레이드 — 5.0에 `HOGDescriptor`/`CascadeClassifier`가 아예
+  없는 것을 발견).
+- **미확정**: photo_type 측정이 인물 3장 중 1장을 놓치는 경계 사례가 여전히 있음(팀원의 40장
+  테스트에서도 유사한 경계 사례 1건 보고됨) — A/B 큐레이션이 충분히 극단적이라 축 계산 정확도에
+  큰 영향은 없을 것으로 판단, 추후 실사용 데이터로 재검토. `recommendations` 앱에서 유저 사진에
+  같은 방식(얼굴 DNN+Haar)을 적용할 때도 이 한계를 참고할 것.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
