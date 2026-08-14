@@ -141,6 +141,23 @@
   이 변경은 ERD와 무관(팀 공유 문서 변경 없음).
 - **영향 범위**: `taste/models.py`의 `ProfileRetrainHistory`. 로컬 마이그레이션 재생성.
 
+### 2026-08-14 — 온보딩 기본질문 제출 API 구현 (#28), 임시 인증 방식 도입
+- **결정**: `POST /users/me/basic-question-responses` (API 명세서 2.1)를 구현. 진짜 로그인(구글 OAuth
+  + JWT)이 accounts 앱에 아직 없어서, `taste/auth_temp.py`의 `get_current_user(request)` 헬퍼로
+  요청 바디의 `user_id`를 받아 사용자를 조회하는 임시 인증을 도입. 호출부는 이 함수 하나만 통해서
+  유저를 얻고, 나중에 accounts 인증이 완성되면 함수 내부만 `request.user`를 반환하도록 교체하면
+  나머지 코드(serializer, view 로직) 변경 없이 실제 인증으로 전환 가능.
+  라운드 건너뛰기 방지(`OnboardingProgress.current_round`와 요청 `round_no` 불일치 시 400),
+  5라운드 완료 시 `OnboardingProgress.current_stage`를 `AB_SELECTION`으로 전환하는 로직도 함께 구현
+  (API 명세서엔 없는, 저희가 정한 세부 로직).
+- **이유**: accounts 담당자와 사전 협의 없이 accounts 앱을 만들 수 없다는 CLAUDE.md 원칙을 지키면서도
+  taste API 개발이 완전히 멈추지 않도록, 인증 지점만 격리해 임시로 대체.
+- **영향 범위**: `taste/auth_temp.py`(신규, **배포 전 반드시 accounts 실제 인증으로 교체 필요**),
+  `taste/serializers.py`(신규, `BasicQuestionResponseSerializer` — 모델 필드 `answer`를 API 키
+  `response`로, 모델 `id`를 API 키 `response_id`로 매핑), `taste/views.py`, `taste/urls.py`(신규),
+  `config/urls.py`(taste.urls include 추가, prefix 없이 명세서 경로 그대로 마운트).
+- **미확정**: accounts 인증이 완성되는 시점에 `auth_temp.py` 제거 및 교체 작업 필요.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
