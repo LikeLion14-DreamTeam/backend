@@ -1,7 +1,9 @@
 """
 accounts/views.py
-1.1 로그인 / 1.2 로그아웃 / 1.3 내 정보 조회 / 1.4 정보 수정.
+1.1 로그인 / 1.2 로그아웃 / 1.3 내 정보 조회 / 1.4 정보 수정 / 1.5 권한 이벤트 기록.
 """
+import logging
+
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from rest_framework import status
@@ -16,9 +18,12 @@ from .authentication import JWTAccessAuthentication
 from .models import User
 from .serializers import (
     GoogleLoginRequestSerializer,
+    PermissionEventRequestSerializer,
     UserSerializer,
     UserUpdateRequestSerializer,
 )
+
+request_logger = logging.getLogger("request_logger")
 
 GOOGLE_CLIENT_ID = get_secret("GOOGLE_CLIENT_ID")
 
@@ -120,3 +125,28 @@ def _me_update(request):
             "permission_intro_shown": request.user.permission_intro_shown,
         }
     )
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def events_permissions(request):
+    """POST /events/permissions — 권한 요청/허용/거부/미지원 상태 이벤트 기록 (1.5)
+    """
+    serializer = PermissionEventRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    permission_type = serializer.validated_data["permission_type"]
+    perm_status = serializer.validated_data["status"]
+    os_name = serializer.validated_data["os"]
+
+    if permission_type in ("camera", "location", "microphone"):
+        field_name = f"{permission_type}_permission"
+        setattr(request.user, field_name, perm_status)
+        request.user.save(update_fields=[field_name])
+    else:  # nfc
+        request_logger.info(
+            "permission_event user_id=%s type=%s status=%s os=%s",
+            request.user.user_id, permission_type, perm_status, os_name,
+        )
+
+    return Response(status=status.HTTP_204_NO_CONTENT)
