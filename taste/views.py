@@ -4,12 +4,20 @@ from rest_framework.response import Response
 
 from .auth_temp import get_current_user
 from .models import (
+    AxisCode,
     BasicQuestionResponse,
     OnboardingProgress,
     OnboardingStage,
     SelectionPhoto,
+    TasteProfileAxis,
 )
-from .serializers import BasicQuestionResponseSerializer, SelectionPhotoSerializer
+from .serializers import (
+    BasicQuestionResponseSerializer,
+    SelectionPhotoSerializer,
+    TasteProfileAxisSerializer,
+)
+
+AXIS_CODE_ORDER = [choice.value for choice in AxisCode]
 
 # SelectionPhoto.round_no: 1~5 = A/B, 6~7 = 무드보드 (연속 번호)
 AB_ROUND_NUMBERS = range(1, 6)
@@ -118,3 +126,11 @@ def submit_selection_photo(request):
         _advance_progress(progress)
 
     return Response(SelectionPhotoSerializer(photo_obj).data)
+
+
+@api_view(["GET"])
+def list_taste_profile_axes(request):
+    user = get_current_user(request)
+    axes = TasteProfileAxis.objects.filter(user=user)
+    axes = sorted(axes, key=lambda axis: AXIS_CODE_ORDER.index(axis.axis_code))
+    return Response({"axes": TasteProfileAxisSerializer(axes, many=True).data})

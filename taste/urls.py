@@ -13,4 +13,9 @@ urlpatterns = [
         views.submit_selection_photo,
         name="selection-photos",
     ),
+    path(
+        "users/me/taste-profile/axes",
+        views.list_taste_profile_axes,
+        name="taste-profile-axes",
+    ),
 ]
