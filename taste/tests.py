@@ -200,6 +200,26 @@ class OnboardingCompletionTests(TestCase):
                 self.assertLess(value, 50)
 
 
+class ListTasteProfileAxesViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create(username="list_axes_test_user")
+
+    def test_no_profile_returns_null_last_updated_at_and_empty_axes(self):
+        response = self.client.get(f"/users/me/taste-profile/axes?user_id={self.user.pk}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"last_updated_at": None, "axes": []})
+
+    def test_existing_profile_returns_last_updated_at(self):
+        TasteProfileAxis.objects.create(user=self.user, axis_code="brightness", value=60)
+        TasteProfile.objects.create(user=self.user, taste="")
+
+        response = self.client.get(f"/users/me/taste-profile/axes?user_id={self.user.pk}")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIsNotNone(body["last_updated_at"])
+        self.assertEqual(len(body["axes"]), 1)
+
+
 class UpdateTasteProfileAxisViewTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create(username="axis_update_test_user")
