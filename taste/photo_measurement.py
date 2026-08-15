@@ -1,9 +1,14 @@
 """
 taste 온보딩 고정 사진 카탈로그의 축별 실측값(0~100)을 계산하는 함수.
 
-이 모듈은 사전계산 스크립트(precompute_photo_measurements 관리 커맨드)에서만 호출된다.
-배포 서버 런타임에서는 이 모듈이 아니라 사전계산 결과(`taste/photo_measurements.py`)만
-읽으므로, CLIP/torch는 로컬/CI에서 사전계산을 돌릴 때만 필요하다.
+taste 온보딩 자체는 사전계산 스크립트(precompute_photo_measurements 관리 커맨드)에서만
+이 모듈을 호출하고, 배포 서버 런타임에서는 사전계산 결과(`taste/photo_measurements.py`)만
+읽는다.
+
+⚠️ 2026-08-16 정정: 위 설명은 taste 온보딩 한정이다. `recommendations` 앱(#71~)이 이
+모듈의 `get_image_embedding`/`measure_all_axes`를 실제 유저 여행 사진 스코어링에 재사용하면서,
+운영 서버에서도 CLIP/torch가 실시간으로 필요해졌다 — 더 이상 "로컬/CI 사전계산 전용"이 아니다.
+배포 인프라에 CLIP 런타임을 어떻게 얹을지는 아직 미해결(`docs/TEMP_NOTES.md` 참고).
 
 인물 감지 방식(얼굴 DNN + 전신/상반신 Haar cascade 조합)은 팀원이 2026-08-11 실제 여행
 사진 40장으로 CLIP 단독 vs 하이브리드를 비교 검증한 결과를 그대로 따른 것이다 — Haar cascade
