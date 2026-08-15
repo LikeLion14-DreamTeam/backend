@@ -258,6 +258,8 @@ class PinCreateViewTests(TestCase):
         stamp = CountryStamp.objects.get(user=self.user)
         self.assertEqual(stamp.country_code, "KR")
         self.assertEqual(stamp.country_name, "대한민국")
+        pin = Pin.objects.get(user=self.user)
+        self.assertEqual(pin.country_code, "KR")
 
     def test_unknown_country_name_does_not_create_stamp(self):
         self.client.post(
@@ -307,6 +309,8 @@ class PinCreateViewTests(TestCase):
         self.assertEqual(response.status_code, 201)
         stamp = CountryStamp.objects.get(user=self.user)
         self.assertEqual(stamp.country_code, "ZZ")
+        pin = Pin.objects.get(user=self.user)
+        self.assertEqual(pin.country_code, "ZZ")
 
     @patch("travel.views.resolve_and_consume")
     def test_audio_file_creates_voice_memo(self, mock_resolve):
@@ -808,3 +812,95 @@ class CountryStampsViewTests(TestCase):
         stamps = response.json()["stamps"]
         self.assertEqual(len(stamps), 1)
         self.assertEqual(stamps[0]["country_code"], "KR")
+
+    def test_pin_count_and_top_cities_are_aggregated(self):
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+        base = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        # 서울 3개, 부산 2개, 제주 1개, 인천 1개 — top3는 핀 수 많은 순으로 서울/부산/(제주,인천 중 하나)
+        city_plan = ["서울", "서울", "서울", "부산", "부산", "제주", "인천"]
+        for i, city in enumerate(city_plan):
+            Pin.objects.create(
+                user=self.user, tagged_at=base + datetime.timedelta(hours=i), city=city, country_code="KR"
+            )
+        # 다른 나라 핀은 집계에 안 들어가야 함
+        Pin.objects.create(user=self.user, tagged_at=base, city="도쿄", country_code="JP")
+
+        response = self.client.get(self.url, **_auth_headers(self.user))
+
+        stamp = response.json()["stamps"][0]
+        self.assertEqual(stamp["pin_count"], 7)
+        self.assertEqual(stamp["cities"][:2], ["서울", "부산"])
+        self.assertEqual(len(stamp["cities"]), 3)
+        self.assertEqual(stamp["extra_city_count"], 1)
+
+    def test_stamp_with_no_matching_pins_returns_zero_count(self):
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.get(self.url, **_auth_headers(self.user))
+
+        stamp = response.json()["stamps"][0]
+        self.assertEqual(stamp["pin_count"], 0)
+        self.assertEqual(stamp["cities"], [])
+        self.assertEqual(stamp["extra_city_count"], 0)
+
+
+class PinListByCountryViewTests(TestCase):
+    url = "/pins"
+
+    def setUp(self):
+        self.user = _make_user()
+
+    def test_missing_token_returns_401(self):
+        response = self.client.get(self.url, {"country_code": "KR"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_missing_country_code_returns_400(self):
+        response = self.client.get(self.url, **_auth_headers(self.user))
+        self.assertEqual(response.status_code, 400)
+
+    def test_returns_only_matching_country_and_user(self):
+        base = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        kr_pin = Pin.objects.create(user=self.user, tagged_at=base, country_code="KR", place_name="카페")
+        Photo.objects.create(pin=kr_pin, captured_at=base, photo_url="https://x/1.jpg")
+        Pin.objects.create(user=self.user, tagged_at=base, country_code="JP")
+        other_user = _make_user()
+        Pin.objects.create(user=other_user, tagged_at=base, country_code="KR")
+
+        response = self.client.get(self.url, {"country_code": "KR"}, **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 200)
+        pins = response.json()["pins"]
+        self.assertEqual(len(pins), 1)
+        self.assertEqual(pins[0]["pin_id"], kr_pin.pin_id)
+        self.assertEqual(pins[0]["photo_count"], 1)
+
+    def test_pins_without_country_code_are_excluded(self):
+        base = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        Pin.objects.create(user=self.user, tagged_at=base, country_code=None)
+
+        response = self.client.get(self.url, {"country_code": "KR"}, **_auth_headers(self.user))
+
+        self.assertEqual(response.json()["pins"], [])
+
+    def test_pagination_cursor_returns_remaining_items(self):
+        base = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        for i in range(3):
+            Pin.objects.create(
+                user=self.user, tagged_at=base + datetime.timedelta(hours=i), country_code="KR"
+            )
+
+        first_page = self.client.get(
+            self.url, {"country_code": "KR", "limit": 2}, **_auth_headers(self.user)
+        )
+        first_body = first_page.json()
+        self.assertEqual(len(first_body["pins"]), 2)
+        self.assertIsNotNone(first_body["next_cursor"])
+
+        second_page = self.client.get(
+            self.url,
+            {"country_code": "KR", "limit": 2, "cursor": first_body["next_cursor"]},
+            **_auth_headers(self.user),
+        )
+        second_body = second_page.json()
+        self.assertEqual(len(second_body["pins"]), 1)
+        self.assertIsNone(second_body["next_cursor"])

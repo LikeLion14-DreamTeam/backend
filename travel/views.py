@@ -85,10 +85,67 @@ def _distance_km(lat1, lng1, lat2, lng2):
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
     return 6371.0 * 2 * atan2(sqrt(a), sqrt(1 - a))
 
-@api_view(["POST"])
+@api_view(["GET", "POST"])
 @authentication_classes([JWTAccessAuthentication])
 @permission_classes([IsAuthenticated])
 def pin_create(request):
+    """
+    GET /pins — 국가별 핀 목록 조회 (3.2, 국가 도장 탭 진입)
+    POST /pins — 촬영 결과로 핀 생성 (8.2)
+    """
+    if request.method == "GET":
+        return _pin_list_by_country(request)
+    return _pin_create(request)
+
+
+def _pin_list_by_country(request):
+    """
+    GET /pins?country_code={code} — 국가 도장을 탭했을 때 그 나라에 저장된 핀만 반환한다.
+    여행 구간 배정 여부와 무관하게 전체를 대상으로 하고, 동선은 다루지 않는다(지도 렌더링은
+    프론트 담당). country_code는 필수 — 값이 없으면 400.
+    """
+    country_code = request.query_params.get("country_code")
+    if not country_code:
+        return Response(
+            {"message": "country_code는 필수입니다.", "code": "VALIDATION_ERROR"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    cursor_id, limit = _parse_pagination(request)
+
+    qs = (
+        Pin.objects.filter(user=request.user, country_code=country_code)
+        .annotate(photo_count=Count("photos"))
+        .order_by("pin_id")
+    )
+    if cursor_id is not None:
+        qs = qs.filter(pin_id__gt=cursor_id)
+
+    pins = list(qs[: limit + 1])
+    next_cursor = None
+    if len(pins) > limit:
+        next_cursor = str(pins[limit - 1].pin_id)
+        pins = pins[:limit]
+
+    return Response(
+        {
+            "pins": [
+                {
+                    "pin_id": p.pin_id,
+                    "latitude": p.latitude,
+                    "longitude": p.longitude,
+                    "place_name": p.place_name,
+                    "photo_count": p.photo_count,
+                    "tagged_at": p.tagged_at,
+                }
+                for p in pins
+            ],
+            "next_cursor": next_cursor,
+        }
+    )
+
+
+def _pin_create(request):
     """
     POST /pins — 촬영 결과로 핀 생성 (8.2)
     """
@@ -106,6 +163,12 @@ def pin_create(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+    country_name = data.get("country_name")
+    # 프론트가 country_code(ISO 3166-1 alpha-2, 예: "KR")를 직접 보내면 그대로 신뢰해서
+    # 쓰고, 안 보내면(구버전 클라이언트 등) 기존처럼 country_name 매핑 테이블로 폴백한다.
+    # 2026-08-16 결정, docs/IMPLEMENTATION.md 참고.
+    country_code = data.get("country_code") or resolve_country_code(country_name)
+
     try:
         with transaction.atomic():
             pin = Pin.objects.create(
@@ -115,7 +178,8 @@ def pin_create(request):
                 longitude=data.get("longitude"),
                 address=data.get("address"),
                 city=data.get("city"),
-                country_name=data.get("country_name"),
+                country_name=country_name,
+                country_code=country_code,
                 place_name=data.get("place_name", ""),
                 tagged_at=timezone.now(),
                 text_note=data.get("text_note"),
@@ -125,11 +189,6 @@ def pin_create(request):
                 tag.tag_count = F("tag_count") + 1
                 tag.save(update_fields=["tag_count"])
 
-            country_name = data.get("country_name")
-            # 프론트가 country_code(ISO 3166-1 alpha-2, 예: "KR")를 직접 보내면 그대로 신뢰해서
-            # 쓰고, 안 보내면(구버전 클라이언트 등) 기존처럼 country_name 매핑 테이블로 폴백한다.
-            # 2026-08-16 결정, docs/IMPLEMENTATION.md 참고.
-            country_code = data.get("country_code") or resolve_country_code(country_name)
             if country_code:
                 CountryStamp.objects.get_or_create(
                     user=request.user, country_code=country_code, defaults={"country_name": country_name}
@@ -896,12 +955,29 @@ def pin_voice_memos(request, pin_id):
 def country_stamps(request):
     """
     GET /users/me/country-stamps — 국가별 방문 도장 목록 (3.3)
+
+    도장마다 핀 수와 방문 도시(핀 수 많은 순 최대 3개, 나머지는 extra_city_count로 뭉침)를
+    함께 내려준다 — 2026-08-16 추가, docs/IMPLEMENTATION.md 참고.
     """
     stamps = CountryStamp.objects.filter(user=request.user).order_by("id")
-    return Response(
-        {
-            "stamps": [
-                {"country_code": s.country_code, "country_name": s.country_name} for s in stamps
-            ]
-        }
-    )
+
+    result = []
+    for stamp in stamps:
+        pins = Pin.objects.filter(user=request.user, country_code=stamp.country_code)
+
+        city_counts = {}
+        for city in pins.exclude(city__isnull=True).exclude(city="").values_list("city", flat=True):
+            city_counts[city] = city_counts.get(city, 0) + 1
+        ranked_cities = sorted(city_counts.items(), key=lambda item: item[1], reverse=True)
+
+        result.append(
+            {
+                "country_code": stamp.country_code,
+                "country_name": stamp.country_name,
+                "pin_count": pins.count(),
+                "cities": [city for city, _ in ranked_cities[:3]],
+                "extra_city_count": max(0, len(ranked_cities) - 3),
+            }
+        )
+
+    return Response({"stamps": result})

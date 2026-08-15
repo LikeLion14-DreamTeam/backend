@@ -47,6 +47,10 @@ class Pin(models.Model):
     # CountryStamp(사용자 단위 도장)와는 별개 — 이 필드가 생기기 전 핀들은 country_name=NULL로 남고
     # 소급 채우기는 불가능(핀-CountryStamp 간 직접 연결이 없음). docs/IMPLEMENTATION.md 참고.
     country_name = models.CharField(max_length=100, null=True, blank=True)
+    # 2026-08-16: 3.2(국가 도장 탭 → 국가별 핀 목록) 필터링용. POST /pins에서 country_code가
+    # 확정되는 시점(직접 지정 또는 country_name 매핑)에 함께 저장한다. country_name과 마찬가지로
+    # 이 필드가 생기기 전 핀들은 NULL로 남고 소급 채우기는 불가능. docs/IMPLEMENTATION.md 참고.
+    country_code = models.CharField(max_length=10, null=True, blank=True)
     included_in_segment = models.BooleanField(default=True)
 
     class Meta:

@@ -1392,6 +1392,26 @@
   docstring 정정("CLIP은 CI 전용"이라는 문구가 recommendations 실연동 이후 틀린 설명이 됨),
   `docs/spec.md`의 "재추천 후보 10장 미만 미확정" 문단이 위쪽 체크리스트와 모순되던 것도 함께 정정.
 
+### 2026-08-16 — 3.2 국가 도장 탭 → 국가별 핀 목록 조회 신설, `Pin.country_code` 필드 추가 (#91)
+- **결정**: `Pin`에 `country_code`(nullable) 필드 신설. `POST /pins`에서 이미 계산되던
+  `country_code`(직접 지정 또는 `country_name` 매핑 폴백) 값을 `CountryStamp`뿐 아니라
+  `Pin`에도 저장한다. `GET /pins?country_code={code}`를 신설해 그 나라 소속 핀 목록을(여행
+  구간과 무관하게, 커서 페이지네이션) 반환한다. `GET /users/me/country-stamps` 응답에도
+  `pin_count`/`cities`(핀 수 많은 순 최대 3개)/`extra_city_count`를 추가했다.
+- **이유**: 애초 "새 엔드포인트 없이 기존 `country-stamps`에 쿼리 분기만 추가"를 검토했으나,
+  국가 필터링을 `Pin.country_name` 역매핑(`country_codes.py`의 매핑 테이블을 거꾸로 조회)으로
+  하면 프론트가 `country_code`를 직접 보내고 `country_name`이 매핑표에 없거나 `null`인 핀을
+  놓친다 — 도장은 찍혔는데 눌러보면 지도가 비어 보이는 버그가 됨. `Pin.country_code`를 핀
+  생성 시점에 그대로 저장해두면 이 문제가 원천적으로 없어진다. `country_name`을 같은 이유로
+  이미 Pin에 추가했던 전례(2026-08-15)를 그대로 따름.
+- **엔드포인트 설계**: 새 URL을 만들지 않고 기존 `POST /pins`(`travel/urls.py`의 `"pins"`
+  경로)에 `GET`을 추가해 이 파일의 다른 곳(`pin_photos`, `trip_current` 등)과 같은
+  GET/POST 디스패치 패턴을 그대로 따름. `_pin_create`/`_pin_list_by_country`로 분리.
+- **영향 범위**: `travel/models.py`(`Pin.country_code`), `travel/migrations/0007_pin_country_code.py`,
+  `travel/views.py`(`pin_create` 디스패처화, `country_stamps` 집계 보강), `travel/tests.py`.
+- **미확정**: 기존 핀은 `country_code=NULL`로 남고 소급 채우기는 불가능 — `country_name`과
+  동일한 한계.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
