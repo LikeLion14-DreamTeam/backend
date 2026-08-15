@@ -3,6 +3,8 @@ photobooks/services.py — 포토북 생성/갱신 시 도시별 핀 선정, 핀
 """
 import random
 
+from django.db.models import F
+
 from travel.models import Photo, Pin
 
 from .models import PhotobookPhotoLayout, PhotobookPin
@@ -53,10 +55,15 @@ def _select_photos_for_pin(pin):
     포토북 속 핀 카드에 보여줄 사진(최대 PHOTOS_PER_PIN장, 1등은 큰 사진)을 고름
     사진이 PHOTOS_PER_PIN장이 안 되면 있는 만큼만 반환
 
-    TODO(recommendations 연동 전 임시): 실제로는 취향 프로파일 기준 스코어링 결과를 써야
-    하지만, 그 스코어링 함수가 아직 없어 임시로 captured_at 순으로 상위 N장을 사용함.
+    Photo.taste_rank(취향 프로파일 기준 순위) 순으로 정렬한다 — 새로 스코어링하지 않고
+    이미 계산돼 있는 값을 그대로 재사용(recommendations 앱 호출 없음). taste_rank가 아직
+    없는 사진(온보딩 미완료 유저, 5.5 최초 스코어링 전)은 뒤로 밀리고 그 안에서
+    captured_at 순으로 대체된다.
     """
-    return list(Photo.objects.filter(pin=pin).order_by("captured_at", "photo_id")[:PHOTOS_PER_PIN])
+    return list(
+        Photo.objects.filter(pin=pin)
+        .order_by(F("taste_rank").asc(nulls_last=True), "captured_at", "photo_id")[:PHOTOS_PER_PIN]
+    )
 
 
 def _write_photo_layout(photobook_pin, pin):
