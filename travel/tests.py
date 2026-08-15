@@ -108,6 +108,58 @@ class PinPhotosInitialScoringTests(TestCase):
         self.assertIsNone(photo.taste_rank)
 
 
+class PinPhotosRegisterRejectionTests(TestCase):
+    """5.5 사진 등록의 반려 사유(MISSING_COORDINATES/OUT_OF_RADIUS/INVALID_FILE) 검증."""
+
+    def setUp(self):
+        self.user = _make_user()
+        self.pin = Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            latitude="37.5000",
+            longitude="127.0000",
+        )
+        self.factory = APIRequestFactory()
+
+    def _post(self, photo_overrides):
+        photo = {"file_id": "file_1", "captured_at": "2026-08-01T09:00:00Z"}
+        photo.update(photo_overrides)
+        request = self.factory.post(
+            f"/pins/{self.pin.pin_id}/photos",
+            {"photos": [photo]},
+            format="json",
+            **_auth_headers(self.user),
+        )
+        return pin_photos(request, self.pin.pin_id)
+
+    def test_missing_coordinates_is_rejected(self):
+        response = self._post({})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["added"], [])
+        self.assertEqual(response.data["rejected"], [{"file_id": "file_1", "reason": "MISSING_COORDINATES"}])
+
+    def test_out_of_radius_photo_is_rejected(self):
+        response = self._post({"latitude": "38.5000", "longitude": "128.0000"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["added"], [])
+        self.assertEqual(response.data["rejected"], [{"file_id": "file_1", "reason": "OUT_OF_RADIUS"}])
+
+    @patch("travel.views.resolve_and_consume")
+    def test_invalid_file_is_rejected(self, mock_resolve):
+        from uploads.tokens import FileNotUploadedError
+
+        mock_resolve.side_effect = FileNotUploadedError("업로드 안 됨")
+
+        response = self._post({"latitude": "37.5001", "longitude": "127.0001"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["added"], [])
+        self.assertEqual(response.data["rejected"], [{"file_id": "file_1", "reason": "INVALID_FILE"}])
+        self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 0)
+
+
 class PinPhotosRefreshTests(TestCase):
     """5.6(대표사진 새로고침) 엔드포인트 검증 (#81)."""
 
@@ -237,6 +289,50 @@ class PinCreateViewTests(TestCase):
         response = self.client.post(
             self.url,
             data={"nfc_tag_id": "does-not-exist"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Pin.objects.filter(user=self.user).count(), 0)
+
+    def test_explicit_country_code_bypasses_name_mapping(self):
+        response = self.client.post(
+            self.url,
+            data={"country_name": "매핑에없는나라", "country_code": "ZZ"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        stamp = CountryStamp.objects.get(user=self.user)
+        self.assertEqual(stamp.country_code, "ZZ")
+
+    @patch("travel.views.resolve_and_consume")
+    def test_audio_file_creates_voice_memo(self, mock_resolve):
+        mock_resolve.return_value = "/media/voice1.mp3"
+
+        response = self.client.post(
+            self.url,
+            data={"audio_file": "token-1"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        pin = Pin.objects.get(user=self.user)
+        self.assertIsNotNone(response.json()["voice_memo"])
+        self.assertTrue(VoiceMemo.objects.filter(pin=pin).exists())
+
+    @patch("travel.views.resolve_and_consume")
+    def test_invalid_audio_file_returns_400_and_no_pin_created(self, mock_resolve):
+        from uploads.tokens import FileNotUploadedError
+
+        mock_resolve.side_effect = FileNotUploadedError("업로드 안 됨")
+
+        response = self.client.post(
+            self.url,
+            data={"audio_file": "token-1"},
             content_type="application/json",
             **_auth_headers(self.user),
         )
@@ -594,6 +690,32 @@ class PinPhotosListViewTests(TestCase):
         self.assertEqual([p["file_path"] for p in photos], ["https://x/1.jpg", "https://x/2.jpg"])
         self.assertTrue(photos[0]["is_pin_cover"])
         self.assertFalse(photos[1]["is_pin_cover"])
+
+    def test_pagination_cursor_returns_remaining_items_on_next_page(self):
+        base = timezone_now()
+        for i in range(3):
+            Photo.objects.create(
+                pin=self.pin,
+                captured_at=base + datetime.timedelta(hours=i),
+                photo_url=f"https://x/{i}.jpg",
+            )
+
+        first_page = self.client.get(self._url() + "?limit=2", **_auth_headers(self.user))
+        self.assertEqual(first_page.status_code, 200)
+        first_body = first_page.json()
+        self.assertEqual(len(first_body["photos"]), 2)
+        self.assertIsNotNone(first_body["next_cursor"])
+
+        second_page = self.client.get(
+            self._url() + f"?limit=2&cursor={first_body['next_cursor']}", **_auth_headers(self.user)
+        )
+        second_body = second_page.json()
+        self.assertEqual(len(second_body["photos"]), 1)
+        self.assertIsNone(second_body["next_cursor"])
+        self.assertEqual(
+            {p["file_path"] for p in first_body["photos"] + second_body["photos"]},
+            {"https://x/0.jpg", "https://x/1.jpg", "https://x/2.jpg"},
+        )
 
     def test_other_users_pin_returns_404(self):
         other_user = _make_user()
