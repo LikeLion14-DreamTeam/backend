@@ -10,6 +10,7 @@ from travel.models import Photo, Pin, VoiceMemo
 
 from .models import Photobook, PhotobookPin
 from .serializers import PhotobookUpdateRequestSerializer
+from .services import refresh_cover_photo
 
 request_logger = logging.getLogger("request_logger")
 
@@ -196,6 +197,25 @@ def _photobook_detail_get(photobook):
             "cities": city_results,
         }
     )
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def photobook_cover_refresh(request, photobook_id):
+    """
+    POST /photobooks/{photobookId}/cover/refresh — 포토북 커버 사진 새로고침 (6.4)
+    """
+    try:
+        photobook = Photobook.objects.get(pk=photobook_id, segment__user=request.user)
+    except Photobook.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    refresh_cover_photo(photobook)
+
+    request_logger.info("POST /photobooks/%s/cover/refresh", photobook_id)
+
+    return Response({"cover_photo_url": photobook.cover_photo_url})
 
 
 def _photobook_detail_patch(request, photobook):
