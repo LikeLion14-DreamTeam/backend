@@ -1,6 +1,8 @@
 # Lambda 컨테이너(clip-scoring) 전용 의존성.
 # torch는 이미지 용량 때문에 Dockerfile에서 CPU 전용 휠(--index-url)로 별도 설치한다 — 여기 넣지 않음.
-numpy
+# opencv-python-headless==4.9.0.80이 NumPy 2.x 이전 빌드라 NumPy도 1.x대로 맞춰 고정
+# (numpy.core.multiarray failed to import — ABI 불일치, 2026-08-16 확인).
+numpy<2
 # 최신 버전이 Lambda(Amazon Linux) 환경에서 cv2.dnn.readNetFromCaffe를 못 읽는 문제가 있어
 # DNN Caffe 로더가 안정적으로 동작하는 버전으로 고정(2026-08-16 확인).
 opencv-python-headless==4.9.0.80
