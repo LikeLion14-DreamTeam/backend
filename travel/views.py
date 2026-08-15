@@ -706,3 +706,19 @@ def pin_voice_memos(request, pin_id):
             )
         }
     )
+
+@api_view(["GET"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def country_stamps(request):
+    """
+    GET /users/me/country-stamps — 국가별 방문 도장 목록 (3.3).
+    """
+    stamps = CountryStamp.objects.filter(user=request.user).order_by("id")
+    return Response(
+        {
+            "stamps": [
+                {"country_code": s.country_code, "country_name": s.country_name} for s in stamps
+            ]
+        }
+    )
