@@ -15,17 +15,19 @@ recommendations 앱이 쓰는 CLIP 임베딩/축 실측 함수의 디스패처.
 
 `recommendations/scoring.py`는 `taste.photo_measurement`를 직접 import하지 않고 이 모듈을
 통해서만 호출한다 — 그래야 scoring.py 쪽 코드 변경 없이 백엔드만 전환할 수 있다.
+
+**`taste.photo_measurement`(torch/opencv/open_clip) import는 반드시 함수 안에서 지연
+로딩할 것 — 파일 최상단에서 import하지 않는다.** `travel/views.py`가 모듈 최상단에서
+`recommendations.travel_adapter`를 import하기 때문에(→ `scoring.py` → 이 모듈), Django
+서버가 뜨는 순간 URL 라우팅 단계에서 이 모듈이 로드된다. 여기서 `taste.photo_measurement`를
+최상단에서 import해버리면 `CLIP_BACKEND` 값과 무관하게 서버 기동 시점에 torch/CLIP이 항상
+메모리에 올라가버려서, EC2 t3.micro(메모리 1GiB)에 배포한 의미가 없어진다(2026-08-16 확인).
 """
 
 import base64
 import json
 
-import cv2
-
 from django.conf import settings
-
-from taste.photo_measurement import get_image_embedding as _local_get_image_embedding
-from taste.photo_measurement import measure_all_axes as _local_measure_all_axes
 
 
 class ClipBackendError(Exception):
@@ -45,6 +47,8 @@ def _lambda_client():
 
 def _encode_image(image):
     """cv2 BGR numpy 배열 -> JPEG base64 문자열."""
+    import cv2
+
     ok, buffer = cv2.imencode(".jpg", image)
     if not ok:
         raise ClipBackendError("이미지를 JPEG로 인코딩하지 못했습니다.")
@@ -71,6 +75,9 @@ def get_image_embedding(image):
 
         body = _invoke_lambda(image, "embedding")
         return np.array(body["embedding"])
+
+    from taste.photo_measurement import get_image_embedding as _local_get_image_embedding
+
     return _local_get_image_embedding(image)
 
 
@@ -78,4 +85,7 @@ def measure_all_axes(image):
     if settings.CLIP_BACKEND == "lambda":
         body = _invoke_lambda(image, "axes")
         return body["axes"]
+
+    from taste.photo_measurement import measure_all_axes as _local_measure_all_axes
+
     return _local_measure_all_axes(image)
