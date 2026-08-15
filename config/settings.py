@@ -141,6 +141,10 @@ DJANGO_APPS = [
 
 PROJECT_APPS = [
     'accounts',
+    'products',
+    'uploads',
+    'travel',
+    'photobooks',
 ]
 
 THIRD_PARTY_APPS = [
@@ -158,6 +162,12 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+
+### AWS (S3 presigned URL 업로드용) ###
+AWS_ACCESS_KEY_ID = get_secret("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = get_secret("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = get_secret("AWS_REGION")
+AWS_STORAGE_BUCKET_NAME = get_secret("AWS_STORAGE_BUCKET_NAME")
 
 
 INSTALLED_APPS = DJANGO_APPS + PROJECT_APPS + THIRD_PARTY_APPS
