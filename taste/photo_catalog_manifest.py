@@ -51,11 +51,24 @@ PHOTO_CATALOG_MANIFEST = {
         ],
     },
     6: {
+        # 거리(가까이/중경/멀리) x 방향(정면/측면(왼쪽)/뒷모습) 3x3 그리드, 업로드 순서 그대로
+        # (2026-08-15 사용자 확인·정정). density 신호로만 쓰이고 이 라벨은 taste 텍스트의
+        # 구도 선호 문구 생성에 쓰인다.
         "axis_code": None,
         "sets": [
             {
                 "set_no": 1,
-                "photos": [{"photo_id": 6000 + i} for i in range(1, 10)],
+                "photos": [
+                    {"photo_id": 6001, "distance": "가까이", "direction": "정면"},
+                    {"photo_id": 6002, "distance": "가까이", "direction": "측면"},
+                    {"photo_id": 6003, "distance": "가까이", "direction": "뒷모습"},
+                    {"photo_id": 6004, "distance": "중경", "direction": "정면"},
+                    {"photo_id": 6005, "distance": "중경", "direction": "측면"},
+                    {"photo_id": 6006, "distance": "중경", "direction": "뒷모습"},
+                    {"photo_id": 6007, "distance": "멀리", "direction": "정면"},
+                    {"photo_id": 6008, "distance": "멀리", "direction": "측면"},
+                    {"photo_id": 6009, "distance": "멀리", "direction": "뒷모습"},
+                ],
             },
         ],
     },

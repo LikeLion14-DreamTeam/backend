@@ -365,6 +365,63 @@
   온보딩 완료 시 축 계산 트리거(다음 이슈, 아직 미착수)를 설계할 때 이 구분(A/B=매니페스트값,
   무드보드=실측값)을 그대로 반영해야 함.
 
+### 2026-08-15 — recommendations는 별도 엔드포인트 없이 travel의 Pin/Photo API 내부 로직
+- **결정**: API 명세서를 다시 확인한 결과, 추천 관련 내용(최초 추천·재추천·대표사진 관리)은
+  별도의 "recommendations" 섹션이 없고 전부 **5번 섹션(여행 기록 탐색, `/pins/...`,
+  `/photos/...`) 안에 있음** — 5.4(사진 목록의 `is_pin_cover`), 5.5(사진 등록 시 내부적으로
+  최초 추천 계산), 5.6(`POST /pins/{pinId}/representative-photos/refresh`, 재추천),
+  5.7(사진 삭제 시 대표사진 자동 대체). 이 리소스들은 전부 `Pin`/`Photo` 소관이라 **travel
+  앱의 엔드포인트**이며, `recommendations` 앱은 REST 엔드포인트를 직접 갖지 않고 travel의
+  뷰가 내부적으로 호출하는 **스코어링 함수(모듈)만 제공**하는 구조로 확정.
+  기능명세서 5.2.2(추천 사진 개별 추가/제외)는 API 명세서에 대응 엔드포인트가 없는데, 사용자
+  확인 결과 **의도적으로 뺀 게 맞음** — "개별 사진 단위 수정은 제공하지 않는다"(5.6 설명)와
+  일치. `RecommendationEdit` 모델도 이에 따라 불필요 확정.
+- **이유**: `recommendations` 앱 스코프를 정확히 잡아야 실제 구현 범위(엔드포인트 vs 함수)를
+  오판하지 않음 — REST API로 착각하고 뷰/URL을 만들면 travel 앱 영역을 침범하게 됨.
+- **영향 범위**: `recommendations` 앱은 모델도 URL도 없이 스코어링 함수(예:
+  `recommendations/scoring.py`의 `score_photos_by_taste` 등, 2026-08-13 결정 로그 참고)만
+  구현하면 됨. **실제 엔드포인트(5.5/5.6/5.7)는 travel 담당자가 만들고, 그 안에서 이 스코어링
+  함수를 import해서 호출하는 구조** — travel 담당자와 함수 시그니처를 미리 맞춰야 함(연동 지점).
+- **미확정**: 스코어링 함수의 정확한 시그니처(입력: user, pin의 사진 목록 / 출력: 정렬된 사진
+  리스트 등)는 recommendations 착수 시 확정, travel 담당자와 공유 필요.
+
+### 2026-08-15 — 온보딩 완료 시 취향 축 계산 및 taste 텍스트 생성 구현 (#55)
+- **결정**: `taste/onboarding_completion.py`에 `compute_and_save_taste_profile(user)` 구현.
+  `taste/views.py`의 `_advance_progress()`에서 무드보드 2라운드 완료로 `COMPLETED` 전환되는
+  시점에 호출. 축별 가중 평균: brightness/vividness/tone/photo_type은 기본질문 0.4 + A/B 0.4 +
+  무드보드2라운드 실측 0.2, density는 기본질문 0.3 + A/B 0.3 + 무드보드1라운드 실측 0.2 +
+  무드보드2라운드 실측 0.2. `TasteProfile.taste`는 축 값을 구간별(≥60/≤40) 형용사로 변환해
+  조합 + 무드보드1라운드 선택 3장의 거리·방향 라벨 다수결로 구도 선호 문구를 추가해 생성.
+  전체 온보딩 시뮬레이션(기본질문 전부 고값 응답 + A/B 전부 80쪽 선택 + 무드보드1 "가까이" 3장
+  선택)으로 검증 — 5개 축 전부 70대로 계산되고 taste 텍스트에 "가까이·정면 구도를 선호합니다"가
+  정확히 반영됨을 확인.
+  `TasteProfileAxis.value`에 `MinValueValidator(0)`, `MaxValueValidator(100)` 추가(마이그레이션
+  포함) — 명세서에 범위가 명시돼 있진 않으나 기존 0~100 관례를 모델 레벨에서도 강제.
+  `taste/photo_catalog_manifest.py`의 무드보드1라운드(round_no 6) 9장에 거리(가까이/중경/멀리)·
+  방향(정면/측면/뒷모습) 라벨 추가(사용자 확인, 업로드 순서가 3x3 그리드 그대로).
+- **이유**: API 명세서 2.3이 "클라이언트가 직접 호출하지 않는 내부 트리거"로 명시돼 있어 별도
+  공개 엔드포인트 없이 온보딩 완료 로직 안에 구현. 가중치는 기본질문·A/B를 "본 신호", 무드보드를
+  "보정 신호"로 두기로 한 기존 방침(2026-08-14)을 수치화한 것 — 스펙에 정확한 숫자가 없어 이번에
+  임의로 확정.
+- **영향 범위**: `taste/onboarding_completion.py`(신규), `taste/views.py`(`_advance_progress`),
+  `taste/models.py`(`TasteProfileAxis.value` 검증 추가, 마이그레이션 `0002`),
+  `taste/photo_catalog_manifest.py`(무드보드1 라벨 추가).
+- **미확정**: 가중치 수치(0.4/0.4/0.2 등)는 임의로 정한 초기값이라, 실사용 데이터가 쌓이면
+  재조정 가능성 있음.
+
+### 2026-08-15 — PHOTO.is_pin_cover: BOOLEAN → INT(순위) 변경 (travel 확정, 문서 동기화)
+- **결정**: travel 담당자가 `PHOTO.is_pin_cover`를 BOOLEAN(대표사진 여부)에서 **INT(대표사진
+  순위, 1/2/3, 대표사진 아니면 NULL)**로 확정 변경. `docs/Orte_sql_v1.sql`, `docs/spec.md` ERD
+  요약 동기화.
+- **이유**: 사용자가 사진을 업로드할 때 단순히 대표사진 여부만 표시하는 게 아니라, 스코어링
+  결과로 **순위를 매겨서** 추천하는 것으로 확정됨.
+- **영향 범위**: taste/recommendations 직접 모델 변경 없음(travel 소관). 다만 **recommendations
+  스코어링 함수의 출력 형태가 바뀜** — 기존엔 "대표사진 3장 리스트"만 반환하면 됐지만, 이제
+  각 사진에 순위(1/2/3)를 매겨서 반환해야 함. 2026-08-15 앞선 결정(recommendations는 스코어링
+  함수만 제공)의 함수 시그니처 설계 시 이 순위 출력을 반영해야 함.
+- **미확정**: 순위 매기는 함수의 정확한 반환 타입(예: `[(photo_id, rank), ...]` vs 정렬된
+  리스트를 travel 쪽에서 enumerate)은 recommendations 착수 시 travel 담당자와 확정.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
