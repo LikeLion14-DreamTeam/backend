@@ -1414,15 +1414,48 @@
   `photo_measurement.py`, `dnn_models/`), `config/settings.py`(`CLIP_BACKEND`,
   `CLIP_LAMBDA_FUNCTION_NAME`).
 - **미확정**:
-  - 실제 Lambda 함수 생성/ECR 이미지 빌드·푸시는 AWS 콘솔 접근이 필요해 이 작업 범위 밖 —
-    AI 팀원이 `lambda_clip_service/Dockerfile` 기준으로 진행 예정. 함수 이름을
-    `clip-scoring`이 아닌 다른 이름으로 만들면 `secrets.json`에
-    `CLIP_LAMBDA_FUNCTION_NAME` 추가해서 맞춰야 함.
   - 지금은 `reduce_similar_photos`가 사진마다 Lambda를 1번씩 호출하는 구조(배치 미적용) —
     콜드스타트/속도 실측 후 느리면 여러 장을 한 번에 묶어 보내는 방식으로 최적화 필요.
   - 배포 서버에서 `CLIP_BACKEND=lambda`로 전환하는 시점(실제 Lambda 함수 생성 완료 후)은
     `secrets.json`에 `CLIP_BACKEND: "lambda"` 추가하는 것으로 전환 — 코드 배포와 별개로
     운영진이 타이밍 조정 가능.
+
+### 2026-08-16 — clip-scoring Lambda 실제 배포·검증 완료, 트러블슈팅 기록
+- **결정**: `lambda_clip_service/`를 실제로 ECR에 푸시하고 Lambda 함수(`clip-scoring`,
+  `ap-northeast-2`, 메모리 3008MB, 타임아웃 60초)로 배포·테스트 완료. `mode: "axes"`/
+  `"embedding"` 둘 다 실제 카탈로그 사진(`taste/photo_catalog/1001.jpg`)으로 호출해 정상
+  응답 확인. 배포 과정에서 발견한 문제 5개를 `Dockerfile`/`requirements.txt`에 반영:
+  1. **아키텍처 불일치**: Apple Silicon 맥에서 `docker build`가 기본으로 arm64 이미지를
+     만드는데 Lambda 함수는 x86_64로 생성돼 있었음(`ProcessSpawnFailed`) — 항상
+     `docker build --platform linux/amd64`로 빌드할 것.
+  2. **파일 권한**: 로컬 소스 파일(`taste/dnn_models/*`)이 `-rw-------`(소유자만 읽기)라
+     이미지에 그대로 복사되면 Lambda 실행 사용자가 못 읽음(`PermissionError`) —
+     `Dockerfile`에 `RUN chmod -R a+rX`로 명시적으로 읽기 권한 부여.
+  3. **torch/torchvision 버전 불일치**: `torch`만 CPU 전용 인덱스로 설치하고
+     `torchvision`을 `open-clip-torch`의 의존성으로 나중에 따로 설치하면 빌드가 어긋남
+     (`operator torchvision::nms does not exist`) — 반드시 `torch`와 `torchvision`을
+     같은 `pip install` 명령·같은 인덱스에서 함께 설치.
+  4. **opencv/numpy 버전**: 최신 `opencv-python-headless`가 Lambda(Amazon Linux) 환경에서
+     `cv2.dnn.readNetFromCaffe`를 못 읽는 문제 발견 → `opencv-python-headless==4.9.0.80`으로
+     고정. 이 버전은 NumPy 2.x 이전 빌드라 `numpy<2`도 같이 고정 안 하면
+     `numpy.core.multiarray failed to import`(ABI 불일치) 발생.
+  5. **CLIP 가중치 런타임 다운로드 실패**: Lambda는 `/tmp` 외 전부 읽기 전용 파일시스템이라,
+     `open_clip`이 첫 호출 때 가중치를 그 자리에서 받으려 하면
+     `[Errno 30] Read-only file system`으로 실패 — `Dockerfile`에 `ENV HF_HOME=/opt/hf_home`
+     지정 후 빌드 타임에 `python3 -c "import open_clip; open_clip.create_model_and_transforms(...)"`로
+     미리 받아 이미지에 포함시키는 방식으로 해결(런타임엔 캐시를 읽기만 함).
+  - 추가로 콜드스타트(torch/CLIP/DNN 모델 로딩)가 기본 타임아웃 30초를 넘겨 첫 호출은
+    `Sandbox.Timedout` 발생 — 타임아웃을 60초로 늘려서 해결.
+- **이유**: 로컬 개발 환경(맥)과 Lambda 실행 환경(Amazon Linux, x86_64, 읽기 전용
+  파일시스템)의 차이에서 오는 문제들이라, 각 원인을 그때그때 로그(`aws logs tail`)로
+  확인하며 하나씩 제거했다. 기록해두지 않으면 다음에 이미지를 새로 빌드할 때 같은 순서로
+  다시 겪을 가능성이 높음.
+- **영향 범위**: `lambda_clip_service/Dockerfile`, `lambda_clip_service/requirements.txt`.
+  AWS 리소스: `clip-scoring`(Lambda 함수), `clip-scoring-role`(Lambda 실행 역할),
+  `dreamteam-ec2-lambda-role`(EC2 인스턴스 역할, Lambda invoke용), ECR 리포지토리
+  `clip-scoring`.
+- **미확정**: 없음 — 배포·양방향 테스트(axes/embedding) 모두 통과. 다음 단계는 배포
+  서버(`secrets.json`)에서 `CLIP_BACKEND=lambda`로 전환하는 것뿐(타이밍은 운영진 판단).
 
 ---
 
