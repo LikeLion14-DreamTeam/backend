@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.authentication import JWTAccessAuthentication
+from photobooks.models import Photobook
 from products.models import NfcTag
 from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
 
@@ -286,6 +287,10 @@ def _trip_create(request):
             pin.included_in_segment = pin.pin_id in included_ids
         Pin.objects.bulk_update(pins, ["segment", "included_in_segment"])
 
+        # 2026-08-15: 포토북은 여행 종료 시점에 자동 생성(6번). cover_photo_url은 취향
+        # 프로파일 스코어링(5.6/6.4와 동일 로직)이 붙기 전까지 null로 둔다.
+        photobook = Photobook.objects.create(segment=segment, name=segment.name)
+
     request_logger.info(
         "POST /trips segment_id=%s user_id=%s pin_count=%s",
         segment.segment_id, request.user.user_id, len(included_pins),
@@ -300,7 +305,7 @@ def _trip_create(request):
             "end_at": segment.end_at,
             "status": segment.status,
             "pin_count": len(included_pins),
-            "photobook_id": None,
+            "photobook_id": photobook.photobook_id,
         },
         status=status.HTTP_201_CREATED,
     )
