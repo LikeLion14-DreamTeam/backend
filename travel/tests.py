@@ -11,7 +11,7 @@ from taste.models import TasteProfileAxis
 from taste.photo_measurement import load_image
 
 from .models import Photo, Pin
-from .views import pin_photos
+from .views import pin_photos, pin_photos_refresh
 
 CATALOG_DIR = Path(__file__).resolve().parent.parent / "taste" / "photo_catalog"
 
@@ -104,3 +104,70 @@ class PinPhotosInitialScoringTests(TestCase):
         self.assertEqual(response.status_code, 200)
         photo = Photo.objects.get(pin=self.pin)
         self.assertIsNone(photo.taste_rank)
+
+
+class PinPhotosRefreshTests(TestCase):
+    """5.6(대표사진 새로고침) 엔드포인트 검증 (#81)."""
+
+    def setUp(self):
+        self.user = _make_user()
+        self.pin = Pin.objects.create(
+            user=self.user, tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        )
+        self.factory = APIRequestFactory()
+
+    def _create_photos(self, catalog_ids):
+        """catalog_ids: taste/photo_catalog의 파일명(확장자 제외), 예: '1001'."""
+        base_time = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        return [
+            Photo.objects.create(
+                pin=self.pin,
+                captured_at=base_time + datetime.timedelta(hours=i),
+                photo_url=f"https://example.com/{catalog_id}.jpg",
+                source_type="uploaded",
+            )
+            for i, catalog_id in enumerate(catalog_ids)
+        ]
+
+    def _refresh(self, user=None):
+        request = self.factory.post(
+            f"/pins/{self.pin.pin_id}/representative-photos/refresh",
+            **_auth_headers(user or self.user),
+        )
+        return pin_photos_refresh(request, self.pin.pin_id)
+
+    @patch("recommendations.travel_adapter._download_image")
+    def test_refresh_with_enough_photos_sets_top_three_ranks(self, mock_download):
+        mock_download.side_effect = lambda url: load_image(CATALOG_DIR / url.rsplit("/", 1)[-1])
+        _set_taste_axes(self.user)
+        self._create_photos(["1001", "1002", "2001", "2002", "3001"])
+
+        response = self._refresh()
+
+        self.assertEqual(response.status_code, 200)
+        representative_photos = response.data["representative_photos"]
+        self.assertEqual(len(representative_photos), 3)
+        returned_ids = {p["photo_id"] for p in representative_photos}
+        ranked_ids = set(
+            Photo.objects.filter(pin=self.pin, taste_rank__lte=3).values_list("photo_id", flat=True)
+        )
+        self.assertEqual(returned_ids, ranked_ids)
+        for p in representative_photos:
+            self.assertIn("url", p)
+
+    def test_fewer_than_four_photos_returns_conflict(self):
+        _set_taste_axes(self.user)
+        self._create_photos(["1001", "1002", "2001"])
+
+        response = self._refresh()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "CONFLICT")
+
+    def test_other_users_pin_returns_404(self):
+        other_user = _make_user()
+        self._create_photos(["1001", "1002", "2001", "2002"])
+
+        response = self._refresh(user=other_user)
+
+        self.assertEqual(response.status_code, 404)
