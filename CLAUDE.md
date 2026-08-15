@@ -3,6 +3,8 @@
 이 파일은 Claude Code가 이 repo에서 세션을 열 때마다 자동으로 읽는 프로젝트 지침입니다.
 모든 작업자(Claude Code 포함)는 아래 규칙을 따릅니다.
 
+중요 규칙: 답변은 모두 한국어로 진행, 코드 추가 및 수정 전 근거를 댈 것
+
 ## 프로젝트 개요
 
 Orte — NFC 태깅으로 여행 순간을 기록하고 취향 기반으로 사진을 추천해 포토북으로 아카이빙하는 서비스.
@@ -22,7 +24,7 @@ Orte — NFC 태깅으로 여행 순간을 기록하고 취향 기반으로 사�
 | 앱 | 담당 도메인 | 주요 모델 |
 |---|---|---|
 | accounts | 계정·인증 | User, Session |
-| taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, ABSelectionLog, ProfileRetrainHistory |
+| taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, SelectionPhoto, ProfileRetrainHistory |
 | recommendations | 추천 | RecommendationResult, RecommendationEdit, RecommendationRegenHistory |
 | products | NFC 제품 | NfcTag |
 | travel | 여행 기록 핵심 | TravelSegment, Pin, TaggingSession, Photo, VoiceMemo, CountryStamp |
@@ -40,6 +42,8 @@ Orte — NFC 태깅으로 여행 순간을 기록하고 취향 기반으로 사�
 4. 스펙(`docs/spec.md`)에 없는 세부 규칙을 새로 정했다면, 코드 작성과 함께 `docs/IMPLEMENTATION.md`에 그 결정과 이유를 짧게 남긴다.
 
 작은 수정(오탈자, 이미 승인된 설계의 단순 반영)까지 매번 재승인받을 필요는 없지만, 새로운 엔드포인트·모델·로직 분기가 생기는 작업은 항상 이 순서를 따른다.
+
+**PR 올리기 전에 이번 PR에서 완성된 API 엔드포인트 목록(메서드+경로+간단 설명)을 별도로 정리해서 알려준다.** 사용자가 이걸 보고 팀 공유용 API 문서를 업데이트하는 데 씀.
 
 ## 핵심 도메인 로직 — 취향 프로파일과 추천
 

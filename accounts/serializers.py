@@ -23,7 +23,7 @@ class GoogleLoginRequestSerializer(serializers.Serializer):
 
 
 class UserUpdateRequestSerializer(serializers.Serializer):
-    """PATCH /users/me 요청 body 검증 (1.4)."""
+    """PATCH /users/me 요청 body 검증 (1.4)"""
 
     onboarding_completed = serializers.BooleanField(required=False)
     permission_intro_shown = serializers.BooleanField(required=False)
