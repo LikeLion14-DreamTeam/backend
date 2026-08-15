@@ -623,11 +623,16 @@ Body
     "nfc_tag_id": "tag_abc",
     "latitude": 35.660, "longitude": 139.702,
     "address": "일본 도쿄도 시부야구 도겐자카 1-2-3",
+    "city": "도쿄", "country_name": "일본", "country_code": "JP",
     "place_name": "",
     "text_note": "노을이 예뻤다",
     "audio_file": "https://cdn.orte.app/voices/55.m4a"
 }
 ```
+`city`/`country_name`/`country_code`는 전부 선택 필드다. `country_code`(ISO 3166-1 alpha-2, 예: `"KR"`)는
+프론트가 직접 계산해서 보낼 수 있고, 보내면 그 값을 그대로 신뢰해 국가 도장(3.3)에 사용한다. 보내지
+않으면 서버가 `country_name`을 `travel/country_codes.py`의 매핑 테이블로 변환해 대신 계산한다(구버전
+클라이언트 호환용 폴백).
 Response
 ```json
 {
