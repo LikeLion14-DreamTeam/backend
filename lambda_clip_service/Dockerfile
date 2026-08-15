@@ -15,4 +15,8 @@ COPY photo_measurement.py .
 COPY dnn_models ./dnn_models
 COPY handler.py .
 
+# 로컬 소스 파일 권한(예: -rw-------)이 그대로 복사되면 Lambda 실행 사용자가 못 읽는 문제가
+# 있어(PermissionError, 2026-08-16 확인) 명시적으로 읽기 권한을 열어준다.
+RUN chmod -R a+rX ${LAMBDA_TASK_ROOT}
+
 CMD ["handler.lambda_handler"]
