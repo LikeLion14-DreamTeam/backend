@@ -15,7 +15,12 @@ from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resol
 
 from .country_codes import resolve_country_code
 from .models import CountryStamp, Photo, Pin, TravelSegment, VoiceMemo
-from .serializers import PinCreateRequestSerializer, TripCreateRequestSerializer, TripPatchRequestSerializer
+from .serializers import (
+    PinCreateRequestSerializer,
+    PinUpdateRequestSerializer,
+    TripCreateRequestSerializer,
+    TripPatchRequestSerializer,
+)
 
 request_logger = logging.getLogger("request_logger")
 
@@ -480,3 +485,86 @@ def trip_pins(request, segment_id):
             "next_cursor": next_cursor,
         }
     )
+
+@api_view(["GET", "PATCH", "DELETE"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def pin_detail(request, pin_id):
+    """
+    GET/PATCH/DELETE /pins/{pinId} — 핀 상세/수정/삭제 (5.1~5.3)
+    """
+    try:
+        pin = Pin.objects.get(pk=pin_id, user=request.user)
+    except Pin.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return _pin_detail_get(pin)
+    if request.method == "PATCH":
+        return _pin_detail_patch(request, pin)
+    return _pin_detail_delete(pin)
+
+
+def _pin_detail_get(pin):
+    """
+    GET /pins/{pinId} (5.1)
+    """
+    voice_memo = getattr(pin, "voicememo", None)
+    representative_photos = Photo.objects.filter(pin=pin, is_main=True).order_by("photo_id")
+
+    return Response(
+        {
+            "pin_id": pin.pin_id,
+            "segment_id": pin.segment_id,
+            "latitude": pin.latitude,
+            "longitude": pin.longitude,
+            "address": pin.address,
+            "place_name": pin.place_name,
+            "tagged_at": pin.tagged_at,
+            "text_note": pin.text_note,
+            "voice_memo": (
+                {"voice_memo_id": voice_memo.voice_memo_id, "duration_sec": voice_memo.duration_sec}
+                if voice_memo
+                else None
+            ),
+            "representative_photos": [
+                {"photo_id": p.photo_id, "url": p.photo_url} for p in representative_photos
+            ],
+        }
+    )
+
+
+def _pin_detail_patch(request, pin):
+    """
+    PATCH /pins/{pinId} (5.2). place_name/text_note만 수정 가능
+    """
+    serializer = PinUpdateRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    update_fields = []
+    if "place_name" in data:
+        pin.place_name = data["place_name"]
+        update_fields.append("place_name")
+    if "text_note" in data:
+        pin.text_note = data["text_note"]
+        update_fields.append("text_note")
+
+    if update_fields:
+        pin.save(update_fields=update_fields)
+
+    return Response({"pin_id": pin.pin_id, "place_name": pin.place_name, "text_note": pin.text_note})
+
+
+def _pin_detail_delete(pin):
+    """DELETE /pins/{pinId} (5.3). 진행 중(segment_id NULL)인 핀만 삭제 가능."""
+    if pin.segment_id is not None:
+        return Response(
+            {"message": "이미 여행에 배정된 핀입니다. 여행 구간 편집에서 제외해주세요.", "code": "CONFLICT"},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    pin_id = pin.pin_id
+    pin.delete()
+    request_logger.info("DELETE /pins/%s", pin_id)
+    return Response(status=status.HTTP_204_NO_CONTENT)
