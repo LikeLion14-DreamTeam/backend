@@ -12,6 +12,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.authentication import JWTAccessAuthentication
+from photobooks.models import Photobook
+from photobooks.services import build_photobook_pins, recompute_photo_layout_for_pin
 from products.models import NfcTag
 from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
 
@@ -110,6 +112,7 @@ def pin_create(request):
                 longitude=data.get("longitude"),
                 address=data.get("address"),
                 city=data.get("city"),
+                country_name=data.get("country_name"),
                 place_name=data.get("place_name", ""),
                 tagged_at=timezone.now(),
                 text_note=data.get("text_note"),
@@ -218,6 +221,38 @@ def trip_list_or_create(request):
     return _trip_create(request)
 
 
+def _countries_with_cities(segment):
+    """
+    여행 구간에 포함된(included_in_segment=True) 핀 기준으로 국가별 도시 목록을 tagged_at
+    순으로 집계한다. 국가 안에 도시가 중첩된 구조 — 어느 도시가 어느 국가 소속인지 프론트가
+    바로 알 수 있게 하기 위함(2026-08-15 사용자 확인, 평평한 배열 2개 대신 이 구조로 결정).
+
+    country_name이 없는 핀(이 필드 추가 전에 만들어진 핀 등)은 국가를 알 수 없어 집계에서
+    완전히 빠진다 — city만 있고 country_name이 없으면 그 city도 어디에도 안 나타난다.
+    docs/IMPLEMENTATION.md 참고.
+    """
+    included_pins = Pin.objects.filter(segment=segment, included_in_segment=True).order_by("tagged_at")
+
+    countries = []
+    by_country = {}
+    for country_name, city in (
+        included_pins.exclude(country_name__isnull=True).exclude(country_name="")
+        .values_list("country_name", "city")
+    ):
+        entry = by_country.get(country_name)
+        if entry is None:
+            entry = {"country_name": country_name, "cities": [], "_seen": set()}
+            by_country[country_name] = entry
+            countries.append(entry)
+        if city and city not in entry["_seen"]:
+            entry["_seen"].add(city)
+            entry["cities"].append(city)
+
+    for entry in countries:
+        del entry["_seen"]
+    return countries
+
+
 def _trip_list(request):
     """GET /trips (4.1). segment_id 내림차순 커서 페이지네이션"""
     cursor_id, limit = _parse_pagination(request)
@@ -232,20 +267,19 @@ def _trip_list(request):
         next_cursor = str(segments[limit - 1].segment_id)
         segments = segments[:limit]
 
-    return Response(
-        {
-            "trips": [
-                {
-                    "segment_id": s.segment_id,
-                    "name": s.name,
-                    "start_at": s.start_at,
-                    "end_at": s.end_at,
-                }
-                for s in segments
-            ],
-            "next_cursor": next_cursor,
-        }
-    )
+    trips = []
+    for s in segments:
+        trips.append(
+            {
+                "segment_id": s.segment_id,
+                "name": s.name,
+                "start_at": s.start_at,
+                "end_at": s.end_at,
+                "countries": _countries_with_cities(s),
+            }
+        )
+
+    return Response({"trips": trips, "next_cursor": next_cursor})
 
 
 def _trip_create(request):
@@ -286,6 +320,14 @@ def _trip_create(request):
             pin.included_in_segment = pin.pin_id in included_ids
         Pin.objects.bulk_update(pins, ["segment", "included_in_segment"])
 
+        # 2026-08-15: 포토북은 여행 종료 시점에 자동 생성(6번). cover_photo_url은 취향
+        # 프로파일 스코어링(5.6/6.4와 동일 로직)이 붙기 전까지 null로 둔다.
+        photobook = Photobook.objects.create(segment=segment, name=segment.name)
+        # 도시별 핀 선정(PhotobookPin) + 핀별 사진 선정(PhotobookPhotoLayout) 확정.
+        # 이후엔 여기서 만든 선정 결과가 고정되고, 5.5에서 사진이 추가될 때만 해당 핀의
+        # 사진 선정을 재계산한다(recompute_photo_layout_for_pin). docs/IMPLEMENTATION.md 참고.
+        build_photobook_pins(photobook)
+
     request_logger.info(
         "POST /trips segment_id=%s user_id=%s pin_count=%s",
         segment.segment_id, request.user.user_id, len(included_pins),
@@ -300,7 +342,7 @@ def _trip_create(request):
             "end_at": segment.end_at,
             "status": segment.status,
             "pin_count": len(included_pins),
-            "photobook_id": None,
+            "photobook_id": photobook.photobook_id,
         },
         status=status.HTTP_201_CREATED,
     )
@@ -332,6 +374,7 @@ def _trip_detail_get(segment):
     included = Pin.objects.filter(segment=segment, included_in_segment=True)
     pin_count = included.count()
     photo_count = Photo.objects.filter(pin__in=included).count()
+    voice_memo_count = VoiceMemo.objects.filter(pin__in=included).count()
 
     return Response(
         {
@@ -343,6 +386,7 @@ def _trip_detail_get(segment):
             "status": segment.status,
             "pin_count": pin_count,
             "photo_count": photo_count,
+            "voice_memo_count": voice_memo_count,
         }
     )
 
@@ -521,7 +565,9 @@ def _pin_detail_get(pin):
     GET /pins/{pinId} (5.1)
     """
     voice_memo = getattr(pin, "voicememo", None)
-    representative_photos = Photo.objects.filter(pin=pin, is_main=True).order_by("photo_id")
+    representative_photos = Photo.objects.filter(
+        pin=pin, taste_rank__isnull=False, taste_rank__lte=3
+    ).order_by("taste_rank")
 
     return Response(
         {
@@ -598,17 +644,46 @@ def pin_photos(request, pin_id):
         return _pin_photos_list(request, pin)
     return _pin_photos_register(request, pin)
 
+
+def _pin_photos_list(request, pin):
+    """
+    GET /pins/{pinId}/photos — 핀 사진 목록 조회 (5.4). 촬영 시각(captured_at) 순 정렬.
+    """
+    cursor_id, limit = _parse_pagination(request)
+
+    qs = Photo.objects.filter(pin=pin).order_by("captured_at", "photo_id")
+    if cursor_id is not None:
+        qs = qs.filter(photo_id__gt=cursor_id)
+
+    photos = list(qs[: limit + 1])
+    next_cursor = None
+    if len(photos) > limit:
+        next_cursor = str(photos[limit - 1].photo_id)
+        photos = photos[:limit]
+
+    return Response(
+        {
+            "photos": [
+                {
+                    "photo_id": p.photo_id,
+                    "captured_at": p.captured_at,
+                    # 명세서(5.4) 응답 필드명 그대로 file_path 사용 — 내부 모델 필드명은 photo_url.
+                    "file_path": p.photo_url,
+                    "is_pin_cover": p.taste_rank is not None and p.taste_rank <= 3,
+                }
+                for p in photos
+            ],
+            "next_cursor": next_cursor,
+        }
+    )
+
+
 def _pin_photos_register(request, pin):
     """
     POST /pins/{pinId}/photos — 사진 등록 (5.5)
     """
     pin_id = pin.pin_id
-    if pin.segment_id is not None and pin.included_in_segment:
-        request_logger.info(
-            "POST /pins/%s/photos — 종료된 여정에 포함된 핀, 포토북 재생성 필요하지만 "
-            "photobooks 앱 없어 스킵 (segment_id=%s)",
-            pin_id, pin.segment_id,
-        )
+    is_finished_trip_pin = pin.segment_id is not None and pin.included_in_segment
 
     serializer = PhotoRegisterRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -647,6 +722,12 @@ def _pin_photos_register(request, pin):
         )
         added.append({"photo_id": photo.photo_id, "file_id": file_id})
 
+    if added and is_finished_trip_pin:
+        # 종료된 여정(포토북 이미 생성됨)의 핀에 사진이 새로 추가된 경우 — 그 핀의 포토북
+        # 사진 선정(PhotobookPhotoLayout)만 재계산한다. 핀 자체 대표사진(taste_rank)이나
+        # 포토북의 핀 선정(PhotobookPin) 자체는 건드리지 않는다.
+        recompute_photo_layout_for_pin(pin)
+
     request_logger.info(
         "POST /pins/%s/photos added=%s rejected=%s", pin_id, len(added), len(rejected)
     )
@@ -667,16 +748,12 @@ def photo_delete(request, photo_id):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     pin = photo.pin
-    was_main = photo.is_main
     photo.delete()
+    # taste_rank<=3인 대표사진이 삭제돼도 별도 "대체" 처리가 필요 없다 — 대표사진 목록은
+    # 매번 taste_rank 순으로 다시 계산되는 값이라, 순위에 빈 자리가 생겨도 자동으로
+    # 다음 순위 사진이 상위 3장 안에 들어온다.
 
-    if was_main:
-        replacement = Photo.objects.filter(pin=pin, is_main=False).order_by("?").first()
-        if replacement is not None:
-            replacement.is_main = True
-            replacement.save(update_fields=["is_main"])
-
-    request_logger.info("DELETE /photos/%s pin_id=%s was_main=%s", photo_id, pin.pin_id, was_main)
+    request_logger.info("DELETE /photos/%s pin_id=%s", photo_id, pin.pin_id)
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -712,7 +789,7 @@ def pin_voice_memos(request, pin_id):
 @permission_classes([IsAuthenticated])
 def country_stamps(request):
     """
-    GET /users/me/country-stamps — 국가별 방문 도장 목록 (3.3).
+    GET /users/me/country-stamps — 국가별 방문 도장 목록 (3.3)
     """
     stamps = CountryStamp.objects.filter(user=request.user).order_by("id")
     return Response(

@@ -42,6 +42,11 @@ class Pin(models.Model):
     saved_at = models.DateTimeField(auto_now_add=True)
 
     city = models.CharField(max_length=100, null=True, blank=True)
+    # 2026-08-15: 4.1(GET /trips) 응답에 여행 구간별 국가 목록을 내려주기 위해 추가.
+    # POST /pins에서 받은 country_name 원본 문자열을 city처럼 그대로 저장(매핑/검증 없음).
+    # CountryStamp(사용자 단위 도장)와는 별개 — 이 필드가 생기기 전 핀들은 country_name=NULL로 남고
+    # 소급 채우기는 불가능(핀-CountryStamp 간 직접 연결이 없음). docs/IMPLEMENTATION.md 참고.
+    country_name = models.CharField(max_length=100, null=True, blank=True)
     included_in_segment = models.BooleanField(default=True)
 
     class Meta:
@@ -66,7 +71,10 @@ class Photo(models.Model):
     source_type = models.CharField(max_length=30, choices=SOURCE_TYPE_CHOICES, default="uploaded")
     photo_url = models.CharField(max_length=500)
 
-    is_main = models.BooleanField(default=False)
+    # 핀 자체 대표사진(5.1/5.4) 선정용 순위. 사진이 1장이어도 순위를 매긴다(핀 사진 전체에 순위 부여).
+    # 수동 새로고침(5.6)에서만 갱신되고, 사진이 추가된다고 자동으로는 안 바뀐다.
+    # 포토북(6.2)에서 쓰는 핀별 대표사진 선정은 이 필드가 아니라 photobooks.PhotobookPhotoLayout로 별도 관리한다.
+    taste_rank = models.IntegerField(null=True, blank=True)
 
     class Meta:
         db_table = "photo"
