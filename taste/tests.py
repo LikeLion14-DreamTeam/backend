@@ -1,7 +1,9 @@
 from pathlib import Path
 
-from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
+from rest_framework_simplejwt.tokens import AccessToken
+
+from accounts.models import User
 
 from .axis_mapping import BASIC_QUESTION_AXIS_MAPPING
 from .models import (
@@ -18,6 +20,17 @@ from .photo_catalog_manifest import PHOTO_CATALOG_MANIFEST
 from .photo_measurements import PHOTO_MEASUREMENTS
 
 PHOTO_CATALOG_DIR = Path(__file__).resolve().parent / "photo_catalog"
+
+
+def _make_user(**kwargs):
+    kwargs.setdefault("account_identifier", f"test-{User.objects.count() + 1}")
+    kwargs.setdefault("email", f"test{User.objects.count() + 1}@example.com")
+    return User.objects.create(**kwargs)
+
+
+def _auth_headers(user):
+    token = AccessToken.for_user(user)
+    return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
 
 class BasicQuestionAxisMappingTests(SimpleTestCase):
@@ -139,7 +152,7 @@ class PhotoMeasurementsTests(SimpleTestCase):
 
 class OnboardingCompletionTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create(username="onboarding_completion_test_user")
+        self.user = _make_user()
 
     def _answer_basic_questions(self, pick_high):
         for round_no, entry in BASIC_QUESTION_AXIS_MAPPING.items():
@@ -202,10 +215,10 @@ class OnboardingCompletionTests(TestCase):
 
 class ListTasteProfileAxesViewTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create(username="list_axes_test_user")
+        self.user = _make_user()
 
     def test_no_profile_returns_null_last_updated_at_and_empty_axes(self):
-        response = self.client.get(f"/users/me/taste-profile/axes?user_id={self.user.pk}")
+        response = self.client.get("/users/me/taste-profile/axes", **_auth_headers(self.user))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"last_updated_at": None, "axes": []})
 
@@ -213,16 +226,20 @@ class ListTasteProfileAxesViewTests(TestCase):
         TasteProfileAxis.objects.create(user=self.user, axis_code="brightness", value=60)
         TasteProfile.objects.create(user=self.user, taste="")
 
-        response = self.client.get(f"/users/me/taste-profile/axes?user_id={self.user.pk}")
+        response = self.client.get("/users/me/taste-profile/axes", **_auth_headers(self.user))
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertIsNotNone(body["last_updated_at"])
         self.assertEqual(len(body["axes"]), 1)
 
+    def test_missing_token_returns_401(self):
+        response = self.client.get("/users/me/taste-profile/axes")
+        self.assertEqual(response.status_code, 401)
+
 
 class UpdateTasteProfileAxisViewTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create(username="axis_update_test_user")
+        self.user = _make_user()
         self.axis = TasteProfileAxis.objects.create(user=self.user, axis_code="brightness", value=50)
         TasteProfile.objects.create(user=self.user, taste="")
         self.url = "/users/me/taste-profile/axes/brightness"
@@ -230,8 +247,9 @@ class UpdateTasteProfileAxisViewTests(TestCase):
     def test_valid_update_returns_reflected(self):
         response = self.client.put(
             self.url,
-            data={"value": 70, "user_id": self.user.pk},
+            data={"value": 70},
             content_type="application/json",
+            **_auth_headers(self.user),
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
@@ -246,41 +264,50 @@ class UpdateTasteProfileAxisViewTests(TestCase):
     def test_out_of_range_value_returns_400(self):
         response = self.client.put(
             self.url,
-            data={"value": 150, "user_id": self.user.pk},
+            data={"value": 150},
             content_type="application/json",
+            **_auth_headers(self.user),
         )
         self.assertEqual(response.status_code, 400)
 
     def test_nonexistent_axis_returns_404(self):
         response = self.client.put(
             "/users/me/taste-profile/axes/vividness",
-            data={"value": 70, "user_id": self.user.pk},
+            data={"value": 70},
             content_type="application/json",
+            **_auth_headers(self.user),
         )
         self.assertEqual(response.status_code, 404)
 
     def test_update_regenerates_taste_text(self):
         self.client.put(
             self.url,
-            data={"value": 80, "user_id": self.user.pk},
+            data={"value": 80},
             content_type="application/json",
+            **_auth_headers(self.user),
         )
         profile = TasteProfile.objects.get(user=self.user)
         self.assertIn("밝은", profile.taste)
 
+    def test_missing_token_returns_401(self):
+        response = self.client.put(self.url, data={"value": 70}, content_type="application/json")
+        self.assertEqual(response.status_code, 401)
+
 
 class RetrainFlowTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create(username="retrain_test_user")
+        self.user = _make_user()
 
     def _complete_onboarding(self, pick_high):
+        headers = _auth_headers(self.user)
         for round_no, entry in BASIC_QUESTION_AXIS_MAPPING.items():
             choices = entry["choices"]
             answer = max(choices, key=choices.get) if pick_high else min(choices, key=choices.get)
             resp = self.client.post(
                 "/users/me/basic-question-responses",
-                data={"round_no": round_no, "response": answer, "user_id": self.user.pk},
+                data={"round_no": round_no, "response": answer},
                 content_type="application/json",
+                **headers,
             )
             self.assertEqual(resp.status_code, 200, resp.content)
 
@@ -295,9 +322,9 @@ class RetrainFlowTests(TestCase):
                         "photo_id": photo["photo_id"],
                         "round_no": round_no,
                         "status": is_selected,
-                        "user_id": self.user.pk,
                     },
                     content_type="application/json",
+                    **headers,
                 )
                 self.assertEqual(resp.status_code, 200, resp.content)
 
@@ -311,9 +338,9 @@ class RetrainFlowTests(TestCase):
                     "photo_id": photo["photo_id"],
                     "round_no": 6,
                     "status": photo["photo_id"] in chosen,
-                    "user_id": self.user.pk,
                 },
                 content_type="application/json",
+                **headers,
             )
             self.assertEqual(resp.status_code, 200, resp.content)
 
@@ -325,9 +352,9 @@ class RetrainFlowTests(TestCase):
                     "photo_id": photo["photo_id"],
                     "round_no": 7,
                     "status": i < 3,
-                    "user_id": self.user.pk,
                 },
                 content_type="application/json",
+                **headers,
             )
             self.assertEqual(resp.status_code, 200, resp.content)
 
@@ -357,8 +384,9 @@ class RetrainFlowTests(TestCase):
         low_answer = min(entry["choices"], key=entry["choices"].get)
         resp = self.client.post(
             "/users/me/basic-question-responses",
-            data={"round_no": 1, "response": low_answer, "user_id": self.user.pk},
+            data={"round_no": 1, "response": low_answer},
             content_type="application/json",
+            **_auth_headers(self.user),
         )
         self.assertEqual(resp.status_code, 200, resp.content)
 

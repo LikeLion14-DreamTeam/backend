@@ -1232,6 +1232,22 @@
   travel의 `Pin`/`Photo` 모델이 실제로 머지되면 이 스코어링 함수를 travel 뷰(5.5/5.6/5.7)에
   연결하는 작업이 남음.
 
+### 2026-08-15 — taste 앱 실제 인증(JWT) 전환 (#69)
+- **결정**: accounts 앱의 구글 로그인 + JWT 인증이 develop에 머지됨에 따라, taste 6개 모델의
+  user FK를 `settings.AUTH_USER_MODEL`에서 `accounts.models.User`로 직접 교체(마이그레이션
+  `0004`). `taste/auth_temp.py`를 삭제하고, taste 5개 뷰(2.1/2.2/2.4/2.5)에
+  `@authentication_classes([JWTAccessAuthentication])` + `@permission_classes([IsAuthenticated])`
+  적용, `request.user`로 사용자를 얻도록 전환 — travel 앱과 동일한 패턴. **API 계약 변경**:
+  기존에 요청 바디/쿼리로 받던 `user_id`가 사라지고, 이제 `Authorization: Bearer {JWT}` 헤더로만
+  인증한다(FE 공유 필요).
+- **이유**: `accounts.User`가 `AbstractBaseUser`를 상속하지 않은 순수 `models.Model`이라
+  `AUTH_USER_MODEL`로 지정 불가능해서 FK를 직접 바꿔야 했음(2026-08-14 결정 로그에서 이미 확인된
+  사항). 로컬 dev DB에 실 데이터가 없어 기존 테스트용 더미 행만 정리하고 마이그레이션 적용.
+- **영향 범위**: `taste/models.py`(6개 모델 FK), `taste/migrations/0004_...`(신규),
+  `taste/views.py`(5개 뷰 전부), `taste/auth_temp.py`(삭제), `taste/tests.py`(JWT 기반으로 갱신,
+  `_make_user`/`_auth_headers` 헬퍼 추가). `docs/TEMP_NOTES.md` 해당 항목 완료 처리.
+- **미확정**: 없음 — TEMP_NOTES.md에 있던 3단계 계획을 전부 완료.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
