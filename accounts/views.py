@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import AccessToken
 
 from config.settings import get_secret
+from travel.models import Pin, TravelSegment
 
 from .authentication import JWTAccessAuthentication
 from .models import User
@@ -103,8 +104,40 @@ def me(request):
     """GET/PATCH /users/me — 조회(1.3)·수정(1.4)을 메서드로 분기
     """
     if request.method == "GET":
-        return Response(UserSerializer(request.user).data)
+        return _me_get(request)
     return _me_update(request)
+
+
+def _me_get(request):
+    """
+    GET /users/me — 내 계정 정보 조회 (1.3). 마이페이지 통계(태깅 횟수/완료 여정 개수/
+    방문 도시 개수)를 함께 내려준다. 1.1(구글 로그인) 응답의 UserSerializer는 이 통계를
+    포함하지 않는다 — 로그인 직후엔 불필요한 집계 쿼리라 1.3에서만 계산.
+    """
+    user = request.user
+    data = UserSerializer(user).data
+
+    # "태깅 횟수" = 핀 전체 개수(NFC/수동 구분 없음). Pin에 생성 방식을 구분하는 필드가 없어
+    # 전체로 집계 — docs/IMPLEMENTATION.md 2026-08-15 항목 참고.
+    pin_count = Pin.objects.filter(user=user).count()
+    completed_trip_count = TravelSegment.objects.filter(user=user, status=True).count()
+    visited_city_count = (
+        Pin.objects.filter(user=user)
+        .exclude(city__isnull=True)
+        .exclude(city="")
+        .values_list("city", flat=True)
+        .distinct()
+        .count()
+    )
+
+    data.update(
+        {
+            "pin_count": pin_count,
+            "completed_trip_count": completed_trip_count,
+            "visited_city_count": visited_city_count,
+        }
+    )
+    return Response(data)
 
 
 def _me_update(request):
