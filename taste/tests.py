@@ -4,7 +4,15 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 
 from .axis_mapping import BASIC_QUESTION_AXIS_MAPPING
-from .models import AxisCode, BasicQuestionResponse, SelectionPhoto, TasteProfile, TasteProfileAxis
+from .models import (
+    AxisCode,
+    BasicQuestionResponse,
+    OnboardingProgress,
+    ProfileRetrainHistory,
+    SelectionPhoto,
+    TasteProfile,
+    TasteProfileAxis,
+)
 from .onboarding_completion import compute_and_save_taste_profile
 from .photo_catalog_manifest import PHOTO_CATALOG_MANIFEST
 from .photo_measurements import PHOTO_MEASUREMENTS
@@ -239,3 +247,104 @@ class UpdateTasteProfileAxisViewTests(TestCase):
         )
         profile = TasteProfile.objects.get(user=self.user)
         self.assertIn("밝은", profile.taste)
+
+
+class RetrainFlowTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create(username="retrain_test_user")
+
+    def _complete_onboarding(self, pick_high):
+        for round_no, entry in BASIC_QUESTION_AXIS_MAPPING.items():
+            choices = entry["choices"]
+            answer = max(choices, key=choices.get) if pick_high else min(choices, key=choices.get)
+            resp = self.client.post(
+                "/users/me/basic-question-responses",
+                data={"round_no": round_no, "response": answer, "user_id": self.user.pk},
+                content_type="application/json",
+            )
+            self.assertEqual(resp.status_code, 200, resp.content)
+
+        for round_no in range(1, 6):
+            # A/B는 라운드당 3세트 중 실제로는 1세트(2장)만 제시·제출된다.
+            photo_set = PHOTO_CATALOG_MANIFEST[round_no]["sets"][0]
+            for photo in photo_set["photos"]:
+                is_selected = (photo["value"] == 80) == pick_high
+                resp = self.client.post(
+                    "/users/me/selection-photos",
+                    data={
+                        "photo_id": photo["photo_id"],
+                        "round_no": round_no,
+                        "status": is_selected,
+                        "user_id": self.user.pk,
+                    },
+                    content_type="application/json",
+                )
+                self.assertEqual(resp.status_code, 200, resp.content)
+
+        mb1_photos = PHOTO_CATALOG_MANIFEST[6]["sets"][0]["photos"]
+        distance = "가까이" if pick_high else "멀리"
+        chosen = {p["photo_id"] for p in mb1_photos if p["distance"] == distance}
+        for photo in mb1_photos:
+            resp = self.client.post(
+                "/users/me/selection-photos",
+                data={
+                    "photo_id": photo["photo_id"],
+                    "round_no": 6,
+                    "status": photo["photo_id"] in chosen,
+                    "user_id": self.user.pk,
+                },
+                content_type="application/json",
+            )
+            self.assertEqual(resp.status_code, 200, resp.content)
+
+        mb2_photos = PHOTO_CATALOG_MANIFEST[7]["sets"][0]["photos"]
+        for i, photo in enumerate(mb2_photos):
+            resp = self.client.post(
+                "/users/me/selection-photos",
+                data={
+                    "photo_id": photo["photo_id"],
+                    "round_no": 7,
+                    "status": i < 3,
+                    "user_id": self.user.pk,
+                },
+                content_type="application/json",
+            )
+            self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_retrain_replaces_profile(self):
+        self._complete_onboarding(pick_high=True)
+        first_axes = {a.axis_code: a.value for a in TasteProfileAxis.objects.filter(user=self.user)}
+        self.assertTrue(all(v > 50 for v in first_axes.values()))
+
+        self._complete_onboarding(pick_high=False)
+
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_stage, "COMPLETED")
+        self.assertFalse(progress.is_retrain)
+
+        second_axes = {a.axis_code: a.value for a in TasteProfileAxis.objects.filter(user=self.user)}
+        self.assertTrue(all(v < 50 for v in second_axes.values()))
+
+        history = ProfileRetrainHistory.objects.get(user=self.user)
+        self.assertIsNotNone(history.completed_at)
+        self.assertGreaterEqual(history.completed_at, history.started_at)
+
+    def test_in_progress_retrain_keeps_old_profile(self):
+        self._complete_onboarding(pick_high=True)
+        first_axes = {a.axis_code: a.value for a in TasteProfileAxis.objects.filter(user=self.user)}
+
+        entry = BASIC_QUESTION_AXIS_MAPPING[1]
+        low_answer = min(entry["choices"], key=entry["choices"].get)
+        resp = self.client.post(
+            "/users/me/basic-question-responses",
+            data={"round_no": 1, "response": low_answer, "user_id": self.user.pk},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_stage, "BASIC_QUESTION")
+        self.assertTrue(progress.is_retrain)
+
+        current_axes = {a.axis_code: a.value for a in TasteProfileAxis.objects.filter(user=self.user)}
+        self.assertEqual(current_axes, first_axes)
