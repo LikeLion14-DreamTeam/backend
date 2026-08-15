@@ -82,6 +82,136 @@ class PhotobookCoverRefreshTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class PhotobookListViewTests(TestCase):
+    url = "/photobooks"
+
+    def setUp(self):
+        self.user = _make_user()
+
+    def test_missing_token_returns_401(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_empty_when_no_photobooks(self):
+        response = self.client.get(self.url, **_auth_headers(self.user))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["photobooks"], [])
+
+    def test_returns_only_requesting_users_photobooks_with_aggregates(self):
+        segment = TravelSegment.objects.create(user=self.user, name="여행")
+        photobook = Photobook.objects.create(segment=segment, name="여행")
+        pin = Pin.objects.create(
+            user=self.user,
+            segment=segment,
+            included_in_segment=True,
+            city="서울",
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+        Photo.objects.create(
+            pin=pin,
+            captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            photo_url="https://x/1.jpg",
+        )
+
+        other_user = _make_user()
+        other_segment = TravelSegment.objects.create(user=other_user, name="다른 여행")
+        Photobook.objects.create(segment=other_segment, name="다른 여행")
+
+        response = self.client.get(self.url, **_auth_headers(self.user))
+
+        photobooks = response.json()["photobooks"]
+        self.assertEqual(len(photobooks), 1)
+        self.assertEqual(photobooks[0]["photobook_id"], photobook.photobook_id)
+        self.assertEqual(photobooks[0]["cities"], ["서울"])
+        self.assertEqual(photobooks[0]["photo_count"], 1)
+
+
+class PhotobookDetailGetViewTests(TestCase):
+    def setUp(self):
+        self.user = _make_user()
+        self.segment = TravelSegment.objects.create(
+            user=self.user,
+            name="여행",
+            start_at=datetime.datetime(2026, 8, 1, 0, 0, 0, tzinfo=datetime.timezone.utc),
+            end_at=datetime.datetime(2026, 8, 3, 0, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+        self.photobook = Photobook.objects.create(segment=self.segment, name="여행")
+
+    def _url(self, photobook_id=None):
+        return f"/photobooks/{photobook_id if photobook_id is not None else self.photobook.photobook_id}"
+
+    def test_missing_token_returns_401(self):
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 401)
+
+    def test_other_users_photobook_returns_404(self):
+        other_user = _make_user()
+        response = self.client.get(self._url(), **_auth_headers(other_user))
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_groups_pins_by_city_with_total_days(self):
+        pin = Pin.objects.create(
+            user=self.user,
+            segment=self.segment,
+            included_in_segment=True,
+            city="도쿄",
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+        photo = Photo.objects.create(
+            pin=pin,
+            captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            photo_url="https://x/1.jpg",
+        )
+        photobook_pin = PhotobookPin.objects.create(photobook=self.photobook, pin=pin, order=1)
+        PhotobookPhotoLayout.objects.create(photobook_pin=photobook_pin, photo=photo, order=1)
+
+        response = self.client.get(self._url(), **_auth_headers(self.user))
+
+        body = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["total_days"], 3)
+        self.assertEqual(body["pin_count"], 1)
+        self.assertEqual(len(body["cities"]), 1)
+        self.assertEqual(body["cities"][0]["city"], "도쿄")
+        self.assertEqual(len(body["cities"][0]["pins"][0]["photos"]), 1)
+
+
+class PhotobookDetailPatchViewTests(TestCase):
+    def setUp(self):
+        self.user = _make_user()
+        self.segment = TravelSegment.objects.create(user=self.user, name="여행")
+        self.photobook = Photobook.objects.create(segment=self.segment, name="여행")
+
+    def _url(self, photobook_id=None):
+        return f"/photobooks/{photobook_id if photobook_id is not None else self.photobook.photobook_id}"
+
+    def test_missing_token_returns_401(self):
+        response = self.client.patch(self._url(), data={}, content_type="application/json")
+        self.assertEqual(response.status_code, 401)
+
+    def test_updates_name(self):
+        response = self.client.patch(
+            self._url(),
+            data={"name": "새 이름"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.photobook.refresh_from_db()
+        self.assertEqual(self.photobook.name, "새 이름")
+
+    def test_other_users_photobook_returns_404(self):
+        other_user = _make_user()
+        response = self.client.patch(
+            self._url(),
+            data={"name": "새 이름"},
+            content_type="application/json",
+            **_auth_headers(other_user),
+        )
+        self.assertEqual(response.status_code, 404)
+
+
 class SelectPhotosForPinTasteRankOrderingTests(TestCase):
     """포토북 핀 카드 사진 선정이 taste_rank 순으로 되는지 검증 (photobooks TODO 해결)."""
 
