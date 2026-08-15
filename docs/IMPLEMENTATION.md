@@ -1377,6 +1377,53 @@
   `photobooks/services.py`(`refresh_cover_photo` 신규), `photobooks/tests.py`(신규, 이전엔 빈
   파일), `docs/spec.md`(체크리스트에 정정 행 추가).
 
+### 2026-08-16 — recommendations CLIP 런타임을 Lambda로 분리 (배포 인프라)
+- **결정**: `taste.photo_measurement`(CLIP+torch, 얼굴 DNN+Haar cascade)를 배포 서버(EC2
+  t3.micro, 메모리 1GiB)에서 직접 실행하지 않고, 별도 Lambda 컨테이너(`lambda_clip_service/`)로
+  위임한다.
+  - `recommendations/clip_backend.py` 신규 — `get_image_embedding`/`measure_all_axes`를
+    감싸는 디스패처. `settings.CLIP_BACKEND`(`"local"` 기본값 / `"lambda"`)로 전환.
+    `"local"`은 `taste.photo_measurement`를 그대로 호출(로컬 개발·테스트용, AWS 자격증명
+    불필요). `"lambda"`는 이미지를 JPEG→base64로 인코딩해 `boto3` Lambda `invoke()`로
+    보내고 응답 JSON을 같은 반환 형식으로 파싱.
+  - `recommendations/scoring.py`는 `taste.photo_measurement` 대신 `clip_backend`를
+    import하도록 한 줄만 변경 — 스코어링 로직(축소/스코어링/순위) 자체는 안 건드림.
+  - `lambda_clip_service/`(신규, Django 앱 아님) — `taste/photo_measurement.py`와
+    `taste/dnn_models/`의 사본(`Dockerfile`, `handler.py`, `requirements.txt` 포함) —
+    Lambda 컨테이너 이미지로 빌드해 배포. **원본과 사본 두 파일은 내용이 동일해야 한다 —
+    로직을 고치면 양쪽 다 수정할 것**(두 파일 상단에 서로 참조하는 주석 추가함).
+  - `config/settings.py`에 `CLIP_BACKEND`/`CLIP_LAMBDA_FUNCTION_NAME` 추가 —
+    `secrets.json`에 값이 없어도 기본값(`"local"`/`"clip-scoring"`)으로 안전하게 동작.
+  - EC2 인스턴스(`dreamteam-backend`)에 `dreamteam-ec2-lambda-role`(IAM 역할, EC2 신뢰
+    정책 + `AWSLambda_FullAccess`) 신규 생성해 연결 — 기존엔 이 인스턴스에 IAM 역할이
+    아예 없었음. 다만 실제 boto3 클라이언트는 uploads 앱(S3)과 동일하게 `secrets.json`의
+    정적 액세스 키(`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, IAM 사용자
+    `dreamteam-be-2`)로 인증한다 — 이 사용자에도 `AWSLambda_FullAccess`를 추가해뒀으니
+    인스턴스 역할과 정적 키 둘 다로 호출 가능한 상태(중복이지만 안전망으로 유지).
+- **이유**: t3.micro 여유 메모리(약 236~463Mi)가 CLIP 로드 필요량(약 600MB)보다 작아 그대로
+  얹으면 OOM 위험이 큼. 범용 CLIP API(HuggingFace 등)로 대체하는 것도 검토했으나,
+  `measure_all_axes()`가 CLIP 임베딩뿐 아니라 얼굴 DNN+Haar cascade 감지까지 커스텀
+  조합이라 대체 불가 — 기존 코드를 그대로 옮기는 방향으로 결정. 팀이 Lambda 배포 경험이
+  없어 EC2 한 대를 추가하는 대안도 검토했으나, 이 워크로드(사진 등록/새로고침 때만 가끔
+  호출)는 상시 서버보다 호출 시에만 과금되는 Lambda가 비용상 더 맞고, Lambda의 월 100만
+  요청/40만 GB-초 무료 한도가 신규 계정의 가입 크레딧과 별개로 영구 적용돼 크레딧 소진과
+  무관하게 운영 가능하다는 점도 고려했다.
+- **영향 범위**: `recommendations/clip_backend.py`(신규), `recommendations/scoring.py`
+  (import 한 줄), `taste/photo_measurement.py`(상단 주석만 갱신, 로직 변경 없음),
+  `lambda_clip_service/`(신규 폴더 — `Dockerfile`, `handler.py`, `requirements.txt`,
+  `photo_measurement.py`, `dnn_models/`), `config/settings.py`(`CLIP_BACKEND`,
+  `CLIP_LAMBDA_FUNCTION_NAME`).
+- **미확정**:
+  - 실제 Lambda 함수 생성/ECR 이미지 빌드·푸시는 AWS 콘솔 접근이 필요해 이 작업 범위 밖 —
+    AI 팀원이 `lambda_clip_service/Dockerfile` 기준으로 진행 예정. 함수 이름을
+    `clip-scoring`이 아닌 다른 이름으로 만들면 `secrets.json`에
+    `CLIP_LAMBDA_FUNCTION_NAME` 추가해서 맞춰야 함.
+  - 지금은 `reduce_similar_photos`가 사진마다 Lambda를 1번씩 호출하는 구조(배치 미적용) —
+    콜드스타트/속도 실측 후 느리면 여러 장을 한 번에 묶어 보내는 방식으로 최적화 필요.
+  - 배포 서버에서 `CLIP_BACKEND=lambda`로 전환하는 시점(실제 Lambda 함수 생성 완료 후)은
+    `secrets.json`에 `CLIP_BACKEND: "lambda"` 추가하는 것으로 전환 — 코드 배포와 별개로
+    운영진이 타이밍 조정 가능.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

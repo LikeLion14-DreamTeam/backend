@@ -1,0 +1,6 @@
+# Lambda 컨테이너(clip-scoring) 전용 의존성.
+# torch는 이미지 용량 때문에 Dockerfile에서 CPU 전용 휠(--index-url)로 별도 설치한다 — 여기 넣지 않음.
+numpy
+opencv-python-headless
+open-clip-torch
+pillow

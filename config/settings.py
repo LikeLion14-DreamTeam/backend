@@ -171,6 +171,13 @@ AWS_SECRET_ACCESS_KEY = get_secret("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = get_secret("AWS_REGION")
 AWS_STORAGE_BUCKET_NAME = get_secret("AWS_STORAGE_BUCKET_NAME")
 
+### recommendations CLIP 백엔드 (2026-08-16 결정, docs/IMPLEMENTATION.md 참고) ###
+# "local": taste.photo_measurement을 그대로 로컬에서 실행(테스트/로컬 개발 기본값).
+# "lambda": AWS Lambda(clip-scoring 컨테이너)로 위임 — 배포 서버에 CLIP/torch 없이 운영.
+# secrets.json에 아직 없는 팀원 환경에서도 안 깨지도록 기본값을 두고 .get()으로 읽는다.
+CLIP_BACKEND = secrets.get("CLIP_BACKEND", "local")
+CLIP_LAMBDA_FUNCTION_NAME = secrets.get("CLIP_LAMBDA_FUNCTION_NAME", "clip-scoring")
+
 
 INSTALLED_APPS = DJANGO_APPS + PROJECT_APPS + THIRD_PARTY_APPS
 

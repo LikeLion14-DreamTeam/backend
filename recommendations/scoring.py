@@ -56,7 +56,7 @@ import random
 
 import numpy as np
 
-from taste.photo_measurement import get_image_embedding, measure_all_axes
+from recommendations.clip_backend import get_image_embedding, measure_all_axes
 
 TIME_PROXIMITY_SECONDS = 120
 SIMILARITY_THRESHOLD = 0.9
