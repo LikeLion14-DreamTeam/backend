@@ -476,6 +476,35 @@
 - **영향 범위**: `taste/views.py`(`list_taste_profile_axes`), `taste/tests.py`
   (`ListTasteProfileAxesViewTests` 추가), `docs/Orte_API_명세서.md` 2.4.
 
+### 2026-08-15 — recommendations 앱 스캐폴딩 및 스코어링 함수 설계 초안
+- **결정**: travel의 `Pin`/`Photo` 모델이 아직 develop에 머지되지 않아 착수는 못 하지만, 미리
+  준비 가능한 부분을 진행. `python manage.py startapp recommendations`로 앱 생성,
+  `config/settings.py`의 `PROJECT_APPS`에 등록(모델 없음, 마이그레이션도 안 생김). 5.2.1/5.2.3
+  기준으로 `recommendations/scoring.py`에 스코어링 함수 설계·구현:
+  - `reduce_similar_photos`: 촬영 시각 근접(120초 이내) + CLIP 임베딩 코사인 유사도(0.9 이상)로
+    유사 사진 축소
+  - `score_photo`: `taste.photo_measurement.measure_all_axes()` 재사용, 유저
+    `TasteProfileAxis`와 축별 절댓값 차이 평균을 100에서 뺀 값을 점수로 사용
+  - `select_initial_recommendations`(5.2.1): 축소 → 스코어링 → 상위 3장
+  - `select_refreshed_recommendations`(5.2.3): 축소 없이 전체 스코어링 → 상위 10장 후보 →
+    3장 무작위 선정(정확히 3장이면 무작위 없이 그대로)
+  - travel 모델 없이도 검증 가능하도록, 사진을 `(photo_id, image, captured_at)` 튜플로 받는
+    duck-typed 인터페이스로 설계 — travel 연동 시 호출부에서 이 형태로 변환해서 넘기면 됨.
+  - `taste/photo_measurement.py`에 `get_image_embedding()` 공개 함수 추가(기존 private
+    CLIP 로딩 재사용) — recommendations가 유사도 판별에 재사용.
+  - 테스트는 taste의 `photo_catalog` 샘플 사진을 알고리즘 검증용으로만 재사용(사진 내용 자체는
+    무의미, 로직 동작만 확인). 11개 전체 통과.
+  - `docs/spec.md` 5.2.3 요약의 "추천 버전을 1 증가시켜 저장" 문구가 API 명세서의 `is_main`
+    플래그 단순화 결정과 어긋나는 것을 발견해 취소선 처리 및 정정.
+- **이유**: travel 브랜치가 리뷰/수정 중이라 당장 못 붙이지만, 알고리즘 설계와 스코어링 로직
+  자체는 travel 모델과 무관하게 미리 만들어둘 수 있어 시간 활용.
+- **영향 범위**: `recommendations/`(신규 앱), `config/settings.py`(`PROJECT_APPS`),
+  `taste/photo_measurement.py`(`get_image_embedding` 추가), `docs/spec.md`(5.2.3 정정).
+- **미확정**: `TIME_PROXIMITY_SECONDS`/`SIMILARITY_THRESHOLD` 구체적 수치는 임의 초기값이라
+  실제 여행 사진으로 재검증 필요. 출력 형식(순위 포함 여부)은 travel 담당자와 연동 시 협의.
+  travel의 `Pin`/`Photo` 모델이 실제로 머지되면 이 스코어링 함수를 travel 뷰(5.5/5.6/5.7)에
+  연결하는 작업이 남음.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
