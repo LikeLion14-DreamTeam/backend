@@ -5,8 +5,10 @@ FROM public.ecr.aws/lambda/python:3.12
 
 WORKDIR ${LAMBDA_TASK_ROOT}
 
-# torch는 이미지 용량을 줄이기 위해 CPU 전용 휠을 별도 인덱스에서 설치
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# torch/torchvision은 이미지 용량을 줄이기 위해 CPU 전용 휠을 쓴다. 반드시 같은 인덱스에서
+# 같이 설치할 것 — torchvision을 open-clip-torch의 의존성으로 나중에 따로 설치하면 torch와
+# 빌드가 어긋나 "operator torchvision::nms does not exist" 에러가 난다(2026-08-16 확인).
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
