@@ -797,6 +797,77 @@
 - **영향 범위**: `travel/views.py`(`_trip_detail_get`). 내부 로직만 추가, 애매한 지점 없음.
 - **검증**: 음성메모 2개가 달린 핀이 포함된 여행 구간에서 `voice_memo_count=2` 확인.
 
+### 2026-08-14 — taste 앱 User FK는 우선 Django 기본 auth.User로
+- **결정**: `accounts` 앱과 커스텀 User 모델이 아직 없어서(AUTH_USER_MODEL 미설정), taste 앱의 모든 모델은
+  당장 `settings.AUTH_USER_MODEL`(현재는 Django 기본 `auth.User`)을 FK로 참조한다.
+- **이유**: accounts는 다른 담당자 영역이라 사전 협의 없이 만들 수 없음(CLAUDE.md). `settings.AUTH_USER_MODEL`
+  참조로 작성해두면 나중에 accounts가 커스텀 User로 바뀌어도 taste 쪽 모델 코드 수정이 필요 없음.
+- **영향 범위**: `taste` 앱 6개 모델(TasteProfile, TasteProfileAxis, BasicQuestionResponse, SelectionPhoto,
+  OnboardingProgress, ProfileRetrainHistory)의 user FK 전부.
+
+### 2026-08-14 — ABSelectionLog는 만들지 않음, SelectionPhoto가 A/B+무드보드 통합 관리
+- **결정**: 앱-모델 매핑표에 있던 `ABSelectionLog`는 별도로 만들지 않는다. ERD의 `SELECTION_PHOTO` 하나로
+  A/B 사진 쌍 선택(5라운드)과 무드보드 사진 선택(2라운드)을 모두 관리한다. `round_no`는 AB 1~5, 무드보드
+  이어서 6~7로 하나의 연속된 번호를 쓴다(ERD에 필드 추가 없이 라운드 구분 가능).
+- **이유**: SELECTION_PHOTO가 이미 "사진 선택" 이벤트 전반을 담당하는 테이블로 설계돼 있어, A/B용 로그
+  테이블을 별도로 두면 같은 개념(사진 선택 기록)이 두 테이블로 쪼개져 중복됨. AI 실측값은 로그 테이블 없이
+  A/B 라운드에서 선택된 사진을 즉시 분석해 `TasteProfileAxis.value`에 바로 반영하는 방식으로 처리.
+- **영향 범위**: `taste` 앱 모델 목록에서 `ABSelectionLog` 제외. `SelectionPhoto.round_no` 1~5=A/B,
+  6~7=무드보드로 애플리케이션 코드에서 해석(상수로 관리).
+
+### 2026-08-14 — 마이페이지 슬라이더/축 6개 → 5개로 정정, 무드보드는 축 값에 신호로만 기여
+- **결정**: `TasteProfileAxis.axis_code`는 5개(brightness, vividness, tone, density, photo_type)만 사용.
+  무드보드 1라운드(캐릭터 각도·거리 9장 중 3장, 구도 선호)와 2라운드(여행사진 9장 중 3장, 선택 사진 분석)는
+  별도 축(distance/angle 등)을 새로 만들지 않고, 둘 다 **`density`(구도와 밀도) 축을 포함한 기존 5축에 대한
+  추가 신호**로 반영한다.
+- **이유**: 기본질문 Q4가 이미 "구도/밀도"를 하나의 축으로 묶어서 다루고 있어, 무드보드의 구도 관련 신호를
+  같은 축에 합치는 게 개념적으로 일관됨. 축 체계를 5개로 유지하면서 신호 소스만 늘어나는 구조.
+- **영향 범위**: `docs/spec.md` 체크리스트에 새 행 추가로 반영. `TasteProfileAxis` 모델의 `axis_code` 선택지.
+  무드보드 분석 결과를 축에 반영하는 구체 로직(가중 평균 등)은 recommendations/taste API 구현 시점에 별도 결정.
+
+### 2026-08-14 — API 명세서(`docs/Orte_API_명세서.md`) 신규 추가, 파일명 정리
+- **결정**: 기존 `docs/Orte_API_명세서_v1.md`(빈 파일)는 사실 "기능명세서" 내용을 담기로 했던 파일이라
+  `docs/Orte_기능명세서_v1.md`로 이름을 바꾸고, 실제 API 엔드포인트 명세는 새 파일
+  `docs/Orte_API_명세서.md`에 정리한다. `docs/spec.md` 내 파일명 참조도 함께 갱신.
+- **이유**: "API 명세서"라는 이름의 파일에 기능명세서 내용이 들어가는 건 혼동 소지가 있어 분리.
+- **영향 범위**: `docs/spec.md`의 파일명 참조 5곳.
+
+### 2026-08-14 — API 명세서 기준으로 축 5개 재확인, 필드명 정합화
+- **결정**: 새로 채워진 `docs/Orte_API_명세서.md`의 2.4(취향 축 목록 조회) 예시가 최초엔 6개 축
+  (brightness/vividness/tone/density/framing/angle)으로 적혀 있었으나, 사용자 확인 후 **5개 축
+  (brightness/vividness/tone/density/photo_type)이 맞는 것으로 확정** — API 명세서 예시 쪽을 수정.
+  필드명은 반대로 API 명세서 쪽이 기준: `BasicQuestionResponse`는 API 응답 키가 `response`이지만
+  ERD(SQL)의 실제 컬럼명이 `answer`라서 **모델 필드명은 ERD 그대로 `answer` 유지, 시리얼라이저에서
+  `response`로 노출**하는 방식으로 처리. `SelectionPhoto.photo_index`(라운드 내 0~8)는 ERD에 없는
+  자체 추가 필드였으므로 API 명세서 예시(`"photo_id": 2011`)를 따라 **`photo_id`로 이름 변경,
+  의미도 "라운드 내 순번"이 아니라 "고정 사진 카탈로그 전역 유일 ID"로 정정**.
+- **이유**: ERD(SQL)는 다른 개발자와 합의된 문서라 필드명을 임의로 바꾸지 않는 원칙 유지. API 응답
+  바디 키는 시리얼라이저 레벨에서 얼마든지 다르게 노출 가능하므로 ERD를 건드릴 필요가 없음.
+  `photo_id`는 ERD에 없던 필드라 API 명세서 기준으로 자유롭게 맞춤.
+- **영향 범위**: `taste/models.py`의 `SelectionPhoto.photo_id`(구 `photo_index`), `unique_together`.
+  로컬 마이그레이션 히스토리 재생성(0001로 스쿼시, 개발 중 데이터 없어 안전). taste API 구현 시
+  `BasicQuestionResponse` 시리얼라이저에서 `answer` ↔ `response` 매핑 필요.
+
+### 2026-08-14 — TasteProfile.version 필드 추가하지 않기로 결정
+- **결정**: 기능명세서 7.2/7.3, 부록 스키마 변경표에 "취향 프로파일 버전을 저장, 재학습 시 1 증가"라고
+  명시돼 있었지만, **`TasteProfile`에 `version` 필드를 추가하지 않기로 확정**.
+- **이유**: version의 유일한 실사용처였던 "추천 결과에 적용 프로파일 버전 기록"이 API 명세서(더 최신/
+  최종 문서) 부록 B에서 "`PHOTO.is_pin_cover` 플래그로 단순화, 추천 이력·버전 관리 미보존"으로 이미
+  취소됨. 마이페이지 슬라이더 화면에도 버전 노출 없음. 기능명세서가 API 명세서보다 최신화가 덜 된
+  문서라는 점을 사용자가 확인 — 두 문서가 충돌하면 API 명세서를 우선한다는 원칙에 따라 제외.
+- **영향 범위**: `TasteProfile` 모델에 `version` 필드 없음 (ERD `TASTE_PROFILE`도 당연히 변경 없음).
+  나중에 실제로 프로파일 버전을 참조하는 기능이 부활하면 그때 다시 검토.
+
+### 2026-08-14 — ProfileRetrainHistory에서 이전 축 값 스냅샷 제거, started_at 추가
+- **결정**: `ProfileRetrainHistory.previous_axis_snapshot`(JSONField) 필드를 제거하고, 대신
+  `started_at`(재학습 시작 시각)을 추가. 최종 필드는 `user`, `started_at`, `completed_at`만 유지.
+- **이유**: 기능명세서 7.3 데이터 항목이 "재학습 이력에는 여행자 식별자, 시작 시각, 완료 시각을
+  저장하며 **이전 프로파일 값은 보관하지 않는다**"고 명시. `previous_axis_snapshot`은 감사/디버깅
+  목적으로 제가 임의로 추가했던 필드라 스펙과 직접 충돌 — 이력(시각) 자체는 저장하되 내용 스냅샷은
+  저장하지 않는 것으로 정정. `ProfileRetrainHistory`는 ERD에 없는 taste 앱 자체 신규 테이블이라
+  이 변경은 ERD와 무관(팀 공유 문서 변경 없음).
+- **영향 범위**: `taste/models.py`의 `ProfileRetrainHistory`. 로컬 마이그레이션 재생성.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

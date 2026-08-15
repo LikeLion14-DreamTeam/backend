@@ -1,0 +1,23 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PW}
+      # DB_USER가 secrets.json 기준 root라, root 비번도 같은 값으로 맞춰서
+      # settings.py가 그대로 쓰는 DB_USER=root, DB_PW로 접속되게 함.
+      MYSQL_ROOT_PASSWORD: ${DB_PW}
+    ports:
+      - "${DB_PORT}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PW}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:
