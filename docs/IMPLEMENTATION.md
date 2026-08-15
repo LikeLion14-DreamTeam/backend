@@ -465,6 +465,17 @@
   수정 신호 초기화"로 명시돼 있으나, 이 신호 자체가 아직 recommendations 쪽에 구현이 없어
   이번 범위에서는 처리할 대상이 없음 — recommendations 착수 시 함께 고려.
 
+### 2026-08-15 — GET 2.4 응답에 last_updated_at 추가
+- **결정**: `GET /users/me/taste-profile/axes`(2.4) 응답에 최상위 필드 `last_updated_at`
+  추가(`TasteProfile.last_updated_at`, 온보딩 미완료로 `TasteProfile`이 없으면 `null`).
+  `docs/Orte_API_명세서.md` 2.4 예시도 동일하게 갱신.
+- **이유**: FE가 마이페이지에 "취향 프로파일 마지막 갱신 시각"을 표시해야 하는데, 이 값
+  자체(`TasteProfile.last_updated_at`, `auto_now=True`)는 재학습 완료·2.5 슬라이더 수정·
+  최초 온보딩 완료 시 이미 정확히 갱신되고 있었으나 어떤 응답에도 노출되지 않고 있었음.
+  로직 변경 없이 응답 필드만 추가하면 되는 단순 보강.
+- **영향 범위**: `taste/views.py`(`list_taste_profile_axes`), `taste/tests.py`
+  (`ListTasteProfileAxesViewTests` 추가), `docs/Orte_API_명세서.md` 2.4.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
