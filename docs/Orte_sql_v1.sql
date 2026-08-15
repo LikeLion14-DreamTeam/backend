@@ -109,6 +109,7 @@ CREATE TABLE `MCM_PRODUCT` (
 );
 
 -- TRAVEL_SEGMENT.status, cover_photo_url: 존치 여부 팀 내 논의 중(보류)
+-- TRAVEL_SEGMENT.dates_manually_set: 4.3(구간 편집) 날짜 직접 선택 반영, 신규(2026-08-15)
 CREATE TABLE `TRAVEL_SEGMENT` (
 	`segment_id`	INT	NOT NULL,
 	`user_id`	INT	NULL,
@@ -116,7 +117,8 @@ CREATE TABLE `TRAVEL_SEGMENT` (
 	`start_at`	DATETIME	NULL,
 	`end_at`	DATETIME	NULL,
 	`status`	BOOLEAN	NULL,
-	`cover_photo_url`	VARCHAR(500)	NULL
+	`cover_photo_url`	VARCHAR(500)	NULL,
+	`dates_manually_set`	BOOLEAN	NOT NULL DEFAULT FALSE
 );
 
 -- PHOTOBOOK.cover_photo_id: 포토북 커버 사진 참조(신규)
@@ -149,6 +151,9 @@ CREATE TABLE `PIN` (
 	`included_in_segment`	BOOLEAN	NOT NULL DEFAULT TRUE
 );
 
+-- PHOTO.is_pin_cover: BOOLEAN -> INT로 변경(2026-08-15, travel 담당자 확정). 대표사진 순위
+-- (1/2/3)를 저장, 대표사진이 아니면 NULL. 추천 스코어링이 단순 플래그가 아니라 순위를 매겨서
+-- 추천하는 것으로 확정됨에 따른 변경.
 CREATE TABLE `PHOTO` (
 	`photo_id`	INT	NOT NULL,
 	`pin_id`	INT	NULL,
@@ -157,7 +162,7 @@ CREATE TABLE `PHOTO` (
 	`longitude`	DECIMAL(10,6)	NULL,
 	`source_type`	VARCHAR(30)	NULL,
 	`photo_url`	VARCHAR(500)	NULL,
-	`is_pin_cover`	BOOLEAN	NULL
+	`is_pin_cover`	INT	NULL
 );
 
 CREATE TABLE `VOICE_MEMO` (

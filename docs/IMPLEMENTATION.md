@@ -141,6 +141,370 @@
   이 변경은 ERD와 무관(팀 공유 문서 변경 없음).
 - **영향 범위**: `taste/models.py`의 `ProfileRetrainHistory`. 로컬 마이그레이션 재생성.
 
+### 2026-08-14 — 온보딩 기본질문 제출 API 구현 (#28), 임시 인증 방식 도입
+- **결정**: `POST /users/me/basic-question-responses` (API 명세서 2.1)를 구현. 진짜 로그인(구글 OAuth
+  + JWT)이 accounts 앱에 아직 없어서, `taste/auth_temp.py`의 `get_current_user(request)` 헬퍼로
+  요청 바디의 `user_id`를 받아 사용자를 조회하는 임시 인증을 도입. 호출부는 이 함수 하나만 통해서
+  유저를 얻고, 나중에 accounts 인증이 완성되면 함수 내부만 `request.user`를 반환하도록 교체하면
+  나머지 코드(serializer, view 로직) 변경 없이 실제 인증으로 전환 가능.
+  라운드 건너뛰기 방지(`OnboardingProgress.current_round`와 요청 `round_no` 불일치 시 400),
+  5라운드 완료 시 `OnboardingProgress.current_stage`를 `AB_SELECTION`으로 전환하는 로직도 함께 구현
+  (API 명세서엔 없는, 저희가 정한 세부 로직).
+- **이유**: accounts 담당자와 사전 협의 없이 accounts 앱을 만들 수 없다는 CLAUDE.md 원칙을 지키면서도
+  taste API 개발이 완전히 멈추지 않도록, 인증 지점만 격리해 임시로 대체.
+- **영향 범위**: `taste/auth_temp.py`(신규, **배포 전 반드시 accounts 실제 인증으로 교체 필요**),
+  `taste/serializers.py`(신규, `BasicQuestionResponseSerializer` — 모델 필드 `answer`를 API 키
+  `response`로, 모델 `id`를 API 키 `response_id`로 매핑), `taste/views.py`, `taste/urls.py`(신규),
+  `config/urls.py`(taste.urls include 추가, prefix 없이 명세서 경로 그대로 마운트).
+- **미확정**: accounts 인증이 완성되는 시점에 `auth_temp.py` 제거 및 교체 작업 필요.
+
+### 2026-08-14 — A/B·무드보드 후보 사진: 라운드당 3세트 준비, 랜덤 제시 (무드보드 1라운드 예외)
+- **결정**: A/B 라운드는 라운드당 2장짜리 세트를 3개(총 6장), 무드보드 라운드는 9장짜리 세트를 3개
+  (총 27장) 준비해두고 그중 하나를 랜덤으로 사용자에게 제시한다. 단, **무드보드 1라운드는 예외** —
+  구도(각도·거리) 선호를 측정하는 라운드라 세트 랜덤을 쓰지 않고 고정된 9장 그대로 사용한다.
+- **이유**: (사용자 확인) 이 랜덤 제시 로직은 "어떤 후보 사진을 보여줄지 고르는" 단계의 관심사이고,
+  `SelectionPhoto.photo_id`가 처음부터 라운드 내 순번이 아니라 **고정 카탈로그 전역 유일 ID**로
+  설계되어 있어(위 "API 명세서 기준 축 5개 재확인" 항목 참고), 라운드당 후보가 몇 세트든 저장
+  스키마·제출 API(`POST /users/me/selection-photos`) 로직에는 영향이 없음. 라운드 완료 판정
+  (A/B 2장 제출·true 1개, 무드보드 9장 제출·true 3개)도 어느 세트가 나왔는지와 무관하게 동일.
+- **영향 범위**: 이번 결정 자체는 모델/API 설계 변경 없음. **다만 후보 사진을 사용자에게 내려주는
+  별도 엔드포인트(아직 API 명세서에 없음, 미설계)를 나중에 만들 때 라운드→3세트 매핑과 무드보드
+  1라운드 예외 처리를 반영해야 함** — 그 작업을 시작할 때 이 항목 참고.
+
+### 2026-08-14 — A/B·무드보드 사진 선택 기록 API 구현 (#30)
+- **결정**: `POST /users/me/selection-photos` (API 명세서 2.2)를 구현. `SelectionPhoto` round_no
+  1~7(1~5=A/B, 6~7=무드보드) 매핑과 `OnboardingProgress.current_stage`(AB_SELECTION/MOODBOARD)
+  + `current_round`(단계 내 번호)를 서로 변환하는 로직 추가. 라운드가 기대 후보 수만큼 채워지면
+  (A/B 2장, 무드보드 9장) 라운드 완료로 보고 다음 라운드/단계로 진행하며, 이때 `status=True` 개수가
+  기대치(A/B 1개, 무드보드 3개)와 다르면 `VALIDATION_ERROR`. 무드보드 2라운드 완료 시
+  `current_stage`를 `COMPLETED`로 전환(단, 취향 축 값 계산/`TasteProfile` 생성은 이번 범위 밖 — 별도
+  이슈에서 진행).
+- **이유**: 라운드 진행 판정 기준을 명세서가 정해주지 않아 자체 설계 필요. 기본질문 API(#28)와 같은
+  건너뛰기 방지 패턴 재사용.
+- **영향 범위**: `taste/serializers.py`(`SelectionPhotoSerializer` 추가), `taste/views.py`
+  (`submit_selection_photo`), `taste/urls.py`.
+- **미확정**: 온보딩 완료(`COMPLETED`) 시점에 실제 `TasteProfileAxis` 값을 계산해 반영하는 로직은
+  별도 이슈로 분리 예정.
+
+### 2026-08-15 — 취향 축 목록 조회 API 구현 (#33)
+- **결정**: `GET /users/me/taste-profile/axes` (API 명세서 2.4)를 구현. `TasteProfileAxis`를
+  `axis_code`, `value`, `status` 3개 필드만 노출하는 read-only 시리얼라이저로 응답. 정렬은
+  `AxisCode` 정의 순서(brightness→vividness→tone→density→photo_type) 고정. 아직 온보딩을
+  완료하지 않아 해당 유저의 축 row가 하나도 없으면 `axes: []` 빈 배열을 반환(별도 404 처리 없음).
+  GET이라 body가 없어서, `auth_temp.get_current_user`가 `request.data`뿐 아니라
+  `request.query_params`에서도 `user_id`를 읽도록 확장(`?user_id=` 쿼리 파라미터 방식).
+- **이유**: 응답 예시 축이 API 명세서상 일시적으로 6개(framing/angle 포함)로 잘못 채워져 있던 걸
+  사용자 확인 후 5개(photo_type 포함)로 재정정(위 2026-08-14 결정과 동일 기준 재확인). 빈 배열
+  응답은 스펙에 명시가 없어 가장 단순한 기본값으로 채택 — 온보딩 미완료 유저의 접근을 막을지는
+  스펙 미확정이라 이번 범위에서 별도 차단 로직은 넣지 않음.
+- **영향 범위**: `taste/auth_temp.py`(`get_current_user` 쿼리 파라미터 지원 추가),
+  `taste/serializers.py`(`TasteProfileAxisSerializer` 추가), `taste/views.py`
+  (`list_taste_profile_axes`), `taste/urls.py`, `docs/Orte_API_명세서.md` 2.4 예시 축 개수 수정(6→5).
+- **미확정**: 온보딩 미완료 유저가 이 API를 호출했을 때 빈 배열 대신 별도 에러를 줘야 하는지는
+  프론트 쪽 UX 결정에 따라 나중에 바뀔 수 있음.
+
+### 2026-08-15 — 무드보드 1라운드는 별도 축이 아니라 density(구도) 신호, OpenAI Vision API 도입 보류
+- **결정**: 무드보드 1라운드(거리×방향 9장 중 3장)는 별도의 distance/angle 축을 만들지 않고
+  기존 `density`(구도와 밀도) 축 하나에 신호로 흡수한다 — density를 "여백 대비 밀도"뿐 아니라
+  "구도" 전반(피사체 거리·방향 포함)으로 넓게 해석. 방향(정면/측면/뒷모습) 판별을 위한 OpenAI
+  Vision API(`analyze_direction`) 신규 도입은 **이번 스코프에 포함하지 않음** (보류).
+- **이유**: 팀 문서에서 angle을 마이페이지 6번째 축으로 부활시키고 OpenAI Vision API를 새로
+  붙이자는 안이 잠깐 나왔으나, 사용자 확인 결과 5축 결정(2026-08-14)이 여전히 유효하고 무드보드
+  1라운드는 애초에 density 축을 검증하려는 라운드였음이 확인됨. 방향 판별은 기존 OpenCV
+  얼굴 검출(정면/측면 캐스케이드)과 density 계산에 이미 쓰는 인물 크기(OpenCV) 측정만으로도
+  충분히 근사 가능하다고 판단 — 외부 API 호출에 따른 지연·비용·장애 리스크 대비 이득이 크지
+  않아 도입을 보류. 정확도가 부족하면 추후 재검토.
+- **영향 범위**: `TasteProfileAxis.axis_code`는 계속 5개 유지. 축 계산 로직(별도 이슈)에서
+  무드보드 1라운드 사진은 density 측정 함수(CLIP+OpenCV 인물크기)의 입력으로만 사용.
+- **미확정**: OpenCV 방향 판별 정확도가 실제로 충분한지는 AI 분석 파이프라인 구현 이슈에서 검증 필요.
+
+### 2026-08-15 — 기본 질문 선택지-축 값 매핑 정의 (#35)
+- **결정**: `taste/axis_mapping.py`에 `BASIC_QUESTION_AXIS_MAPPING` 상수 추가. 기본 질문 5라운드
+  각각의 실제 선택지 문구(팀이 확정한 문구)와 그에 대응하는 축 값(0~100, 2지선다)을 정의.
+  예: brightness 라운드는 "환하고 밝은 느낌"(80) / "어둡고 무드있는 느낌"(20). density만 방향을
+  반대로 둠("여백" 20, "꽉 참" 80) — 나머지는 1번 선택지가 축의 높은 값 쪽에 대응.
+  매핑 데이터 무결성(5라운드 전부 존재, 축 코드 중복 없음, 선택지 2개, 값 범위 0~100, 라운드 내
+  값 중복 없음)을 검증하는 테스트를 `taste/tests.py`에 추가.
+- **이유**: `BasicQuestionResponse.answer`는 자유 텍스트가 아니라 팀이 확정한 2지선다 칩 문구
+  중 하나가 저장되는 구조인데, 이 문구를 축 값으로 변환하는 규칙이 스펙 어디에도 없어서 별도
+  결정 필요 — 팀에서 공유한 문항 문구를 그대로 채택하고 값(80/20)은 이번에 확정.
+- **영향 범위**: `taste/axis_mapping.py`(신규), `taste/tests.py`. 실제 `TasteProfileAxis` 값을
+  계산해 저장하는 로직(온보딩 완료 트리거)은 이번 이슈 범위 밖 — A/B·무드보드 AI 실측 파이프라인과
+  함께 별도 이슈에서 이 매핑을 가져다 쓸 예정.
+- **미확정**: A/B·무드보드 사진 실물 파일을 백엔드가 접근 가능한 저장소(S3/static 등)로 옮기는
+  작업이 선행돼야 AI 실측 파이프라인 이슈를 시작할 수 있음.
+
+### 2026-08-15 — TRAVEL_SEGMENT.dates_manually_set 컬럼 추가 (travel 앱, 문서 동기화)
+- **결정**: travel 담당자가 ERD 원본에 `TRAVEL_SEGMENT.dates_manually_set`(BOOLEAN, 기본 false)
+  컬럼을 추가함에 따라 `docs/Orte_sql_v1.sql`, `docs/spec.md`의 ERD 요약 표를 동일하게 갱신.
+- **이유**: 4.3(여행 구간 편집)에서 날짜를 사용자가 직접 선택할 수 있게 되면서, 이후 핀을 껐다
+  켜는 등으로 날짜가 자동 재계산될 때 사용자가 직접 정한 날짜를 덮어쓰지 않으려면 "직접 정한
+  적 있는지"를 서버가 기억해야 함. travel 앱 소관 테이블이라 Django 모델 자체는 건드리지 않고
+  공유 문서(ERD SQL, spec.md)만 동기화.
+- **영향 범위**: taste/recommendations 로직에는 직접 영향 없음. travel 앱 담당자가 Django
+  모델/마이그레이션 반영.
+
+### 2026-08-15 — 5.6(재추천) 구현 시 참고: 종료된 여정에 추가된 사진도 포함해야 함
+- **결정**: (아직 미구현, recommendations 앱 착수 시 참고용 메모) 5.5에서 종료된 여정의 핀에도
+  사진을 수동으로 추가할 수 있게 되면서, 그 시점엔 대표 사진(추천 결과)이 바로 바뀌지 않지만
+  5.6(새로고침/재추천) 호출 시에는 그 사이 새로 추가된 사진까지 후보 풀에 포함해서 재선정해야 함.
+- **이유**: travel 담당자가 5.5 사진 추가 로직을 종료된 여정까지 확장하면서, 대표 사진 갱신
+  타이밍(추가 즉시 vs 재추천 시점)을 recommendations 쪽에 명확히 알려옴.
+- **영향 범위**: `recommendations` 앱의 재추천 스코어링 함수(향후 구현 예정, 이전 결정 로그의
+  `score_photos_by_taste` 참고)가 후보 사진을 조회할 때 핀에 연결된 **현재 시점의 전체 사진**을
+  기준으로 삼아야 함(추천 호출 시점 스냅샷이 아니라 매번 최신 조회) — 별도 캐싱/스냅샷 로직을
+  두지 않는 이상 자연히 만족되는 조건이라, 구현 시 "사진 목록을 캐싱하지 말 것"만 유의하면 됨.
+- **미확정**: recommendations 앱 자체가 아직 미착수라 실제 코드 반영은 나중.
+
+### 2026-08-15 — 무드보드 1라운드 "방향" 신호는 축이 아니라 TasteProfile.taste 텍스트로 (최종)
+- **결정**: 무드보드 1라운드(거리×방향 9장 중 3장)에서 **거리(distance)**는 계속 `density` 축
+  신호로 흡수하고(2026-08-15 앞선 결정 유지), **방향(direction: 정면/측면/뒷모습)**은 별도 축을
+  만들지 않는 대신 `TasteProfile.taste`(기존 자유 텍스트 필드)를 생성할 때 반영하는 요소 중
+  하나로 포함한다. 즉 슬라이더로 노출·조작 불가능하고, 추천 스코어링에만 내부적으로 쓰인다.
+  무드보드 2라운드(조합 사진 9장 중 3장)는 이 논의와 무관하게 기존 결정대로 — 선택된 3장을
+  A/B와 동일한 측정 함수로 분석해 **5개 축 전부**에 신호 반영.
+- **이유**: density(여백 대비 밀도)와 무드보드 1라운드의 "거리"는 이미 A/B 라운드4 측정 방식
+  자체가 "CLIP + 인물크기(OpenCV)"라 상당 부분 겹침. 반면 "방향"은 density 개념과 겹치지 않는
+  별개 신호인데, 이를 위해 6번째 축을 새로 만들면 마이페이지 슬라이더 개수·모델·API 응답이
+  전부 늘어나는 큰 변경이 됨. `TasteProfile.taste`가 이미 "서버가 내부적으로 계산해 추천에만
+  쓰는 자유 텍스트"로 설계돼 있어(API 명세서 2.3), 새 필드를 추가하지 않고 이 필드의 생성 요소
+  중 하나로 편입하는 것으로 확정. 이 축 개수 논의는 오늘 하루 동안 여러 번 뒤집혔던 사안이라
+  (6개→5개→1라운드 density만→방향 별도 고려→최종 이 결정) 이번이 최종안.
+- **영향 범위**: `TasteProfileAxis.axis_code`는 계속 5개 유지, 모델 변경 없음. `TasteProfile.taste`
+  생성 로직(2.3 PUT 내부 트리거 구현 시)이 축 값뿐 아니라 무드보드 1라운드 선택 결과(방향
+  선호)도 입력으로 받아야 함 — 아직 이 생성 로직 자체가 미구현이라 실제 코드 반영은 AI 실측
+  파이프라인/취향 프로파일 계산 이슈에서 진행.
+- **미확정**: 방향 선호를 어떤 규칙으로 텍스트 문구화할지(예: 선택 3장 중 다수결로 "정면 클로즈업
+  선호" 식 템플릿 문장 생성 등)는 아직 안 정함 — 실제 계산 로직 설계 시 확정.
+
+### 2026-08-15 — 사진 카탈로그 저장 및 세트 매니페스트 구성 (#37)
+- **결정**: A/B·무드보드 고정 사진 66장을 `taste/photo_catalog/{photo_id}.jpg`로 저장.
+  `photo_id`는 `round_no`를 접두어로 사용(1~5라운드는 `{round_no}001~006`, 6라운드는
+  `6001~6009`, 7라운드는 `7001~7027`). `taste/photo_catalog_manifest.py`에 라운드→세트→
+  photo_id 매핑을 상수로 정의, A/B는 기획 참조값(`value`: 20/80)도 함께 기록(실측 함수 검증용,
+  실제 유저 응답 아님). 매니페스트-실제 파일 1:1 대응 등을 검증하는 테스트 추가.
+  원본 사진은 짧은 변 800px로 리사이즈, JPEG quality 85로 재압축(21.2MB → 6.1MB).
+  `opencv-python`, `pillow` 의존성을 `pyproject.toml`에 추가.
+- **이유**: `photo_id`가 라운드 내 순번이 아니라 카탈로그 전역 유일 ID로 설계돼 있어(2026-08-14
+  결정), 파일 저장도 라운드/세트 하위 폴더 없이 평평한 구조로 충분. 원본 그대로 커밋하면 git
+  히스토리에 27MB가 영구히 남으므로, AI 분석에 불필요한 고해상도를 리사이즈로 줄임.
+  리사이즈 도중 `4001~4006.jpg`(density), `5001~5006.jpg`(phototype) 6개 파일이 확장자만
+  `.jpg`이고 실제로는 **AVIF**로 인코딩된 것을 발견 — opencv가 디코딩하지 못해 확인됨.
+  Pillow로 디코딩해 진짜 JPEG로 재저장하여 해결.
+- **영향 범위**: `taste/photo_catalog/`(신규, 66개 파일), `taste/photo_catalog_manifest.py`(신규),
+  `taste/tests.py`(`PhotoCatalogManifestTests` 추가), `pyproject.toml`/`poetry.lock`
+  (`opencv-python`, `pillow` 추가).
+- **미확정**: CLIP 계열(`open-clip-torch`) 의존성은 Windows 긴 경로 제한 문제로 설치 보류 중
+  (`docs/TEMP_NOTES.md` 참고 예정). 실제 측정 함수(HSV/R-B/CLIP+인물크기/사람 감지)와
+  `TasteProfile.taste` 텍스트 생성 로직은 별도 이슈에서 구현.
+
+### 2026-08-15 — `open-clip-torch` 설치 완료, Python 상한 버전 고정
+- **결정**: Windows "긴 경로 이름 사용" 옵션을 켠 뒤(`docs/TEMP_NOTES.md` 참고) `open-clip-torch`
+  설치 재시도 → `torchvision` 최신판(0.28.0)이 Python 3.14.1 특정 패치 버전만 배제하는데
+  `pyproject.toml`의 `requires-python = ">=3.12"`가 위쪽을 안 막아놔서 충돌 발생. 실제로 팀 전체가
+  pyenv로 3.12.1에 고정해서 쓰므로 `requires-python`을 `">=3.12,<3.13"`으로 좁혀서 해결.
+  `torch 2.13.0+cpu`, `open_clip 3.3.0`, `cv2 5.0.0` 전부 정상 import 확인.
+- **이유**: 실제 사용 범위를 정직하게 반영하는 제약이라 임시방편이 아님 — 3.13/3.14대 지원은
+  현재 아무도 안 씀.
+- **영향 범위**: `pyproject.toml`(`requires-python`), `poetry.lock`.
+
+### 2026-08-15 — taste 온보딩 사진 실측은 정적 사전계산, recommendations는 런타임 CLIP 필요 (배포 메모)
+- **결정**: taste 온보딩 카탈로그(고정 66장)의 축 실측값은 **CLIP을 배포 서버에서 매번 돌리지
+  않고, 로컬/CI에서 한 번 미리 계산해 정적 데이터로 저장**한다 — 배포 환경엔 CLIP/torch 자체가
+  필요 없어짐. 다만 이건 taste 온보딩에만 해당하고, **`recommendations`(5.2.1, 유저가 매번
+  새로 올리는 여행 사진 스코어링)는 사진이 고정돼 있지 않아 런타임에 CLIP을 실제로 돌려야 함** —
+  이 경우엔 배포 환경에 CLIP 가중치 캐싱(Docker 이미지에 미리 포함 또는 영구 볼륨)이 실제로 필요.
+  비전 LLM API(GPT-4V 등) 대안도 검토했으나, 유저 사진마다 매번 호출되는 고빈도 작업이라 사용량
+  비례 비용·프라이버시(외부로 사진 전송)·외부 API 지연 부담이 있어 자체 호스팅 CLIP을 권장.
+- **이유**: taste와 recommendations는 "사진이 고정 자산인가 매번 새로 올라오는가"가 근본적으로
+  달라서 같은 CLIP 배포 전략을 못 씀 — 이 구분을 착각하면 recommendations 설계 시 "이미 해결된
+  문제"로 잘못 넘어갈 수 있어 명시적으로 기록.
+- **영향 범위**: taste 이번 이슈(측정 함수)는 배포 부담 없음. `recommendations` 앱 착수 시
+  CLIP 가중치 캐싱 인프라를 반드시 별도로 준비해야 함(비용 문제는 현재 우선순위 아님, 확인됨).
+- **미확정**: recommendations의 정확한 배포 방식(Docker 이미지에 가중치 포함 vs 영구 볼륨)은
+  실제 배포 인프라 담당자와 착수 시점에 논의 필요.
+
+### 2026-08-15 — 사진 실측 함수 구현 및 사전계산 완료 (#39)
+- **결정**: `taste/photo_measurement.py`에 5개 축 측정 함수 구현.
+  - brightness/vividness/tone: HSV V·S채널 평균, R−B 채널차 (순수 픽셀 계산, AI 아님)
+  - density: CLIP 제로샷(영어 프롬프트) + Canny 엣지 밀도 50:50 가중 평균
+  - photo_type: 얼굴 DNN(SSD+ResNet, `res10_300x300_ssd_iter_140000.caffemodel`) + 전신/상반신
+    Haar cascade 조합 — 셋 중 하나라도 사람을 감지하면 인물 쪽 점수
+  - `taste/dnn_models/`에 얼굴 검출 모델 파일 2개(약 10MB) 추가(OpenCV 공식 GitHub에서 받음)
+  - `taste/management/commands/precompute_photo_measurements.py` 신규: 카탈로그 66장 전체를
+    측정해 `taste/photo_measurements.py`(정적 데이터)로 저장하는 1회성 개발자 커맨드. 실행 완료.
+  - 테스트는 `photo_measurements.py`(정적 데이터)만 검증 — CLIP/torch를 테스트 시점에 다시
+    돌리지 않아 빠름(15개 테스트 0.014초). A/B 라운드는 참조값(20/80) 대비 방향성만 검증.
+- **이유**: 초기 구현(HOG 사람 감지, 한국어 CLIP 프롬프트, CLIP 단독 density)을 66장 카탈로그로
+  실측 검증한 결과 photo_type이 전부 미검출(10.0 고정), density 신호가 거의 없었음(60.8 vs 62.0).
+  마침 팀원이 2026-08-11에 실제 여행 사진 40장으로 CLIP 단독 vs 하이브리드(규칙기반+DNN 얼굴
+  검출+Haar 전신/상반신+CLIP 구도) 방식을 미리 비교 검증해둔 문서가 있어 그 결론을 그대로 채택.
+  Haar cascade 얼굴 검출 단독은 반복 패턴(키패드 등)을 얼굴로 오탐하는 사례가 실측으로 확인되어
+  DNN으로 교체된 이력이 있음. 이 교체 후 재검증하니 density가 20.8 vs 67.8로, photo_type이
+  15.0 vs 47.6으로 개선되어 5개 축 전부 방향성 테스트를 통과함.
+- **영향 범위**: `taste/photo_measurement.py`(신규), `taste/dnn_models/`(신규, 모델 파일 2개),
+  `taste/management/commands/precompute_photo_measurements.py`(신규), `taste/photo_measurements.py`
+  (신규, 사전계산 결과), `taste/tests.py`(`PhotoMeasurementsTests` 추가), `pyproject.toml`
+  (`opencv-python`을 5.0→4.x로 다운그레이드 — 5.0에 `HOGDescriptor`/`CascadeClassifier`가 아예
+  없는 것을 발견).
+- **미확정**: photo_type 측정이 인물 3장 중 1장을 놓치는 경계 사례가 여전히 있음(팀원의 40장
+  테스트에서도 유사한 경계 사례 1건 보고됨) — A/B 큐레이션이 충분히 극단적이라 축 계산 정확도에
+  큰 영향은 없을 것으로 판단, 추후 실사용 데이터로 재검토. `recommendations` 앱에서 유저 사진에
+  같은 방식(얼굴 DNN+Haar)을 적용할 때도 이 한계를 참고할 것.
+
+### 2026-08-15 — A/B 라운드는 실측값 대신 매니페스트 참조값을 축 계산에 사용
+- **결정**: 온보딩 완료 시 실제 `TasteProfileAxis` 값을 계산할 때, **A/B 라운드(1~5)는
+  `taste/photo_measurements.py`의 실측값이 아니라 `taste/photo_catalog_manifest.py`에 이미
+  있는 큐레이션 참조값(20/80)을 그대로 사용**한다. 무드보드(6~7라운드)는 애초에 참조값이 없으므로
+  기존 계획대로 실측값을 사용한다.
+- **이유**: A/B 사진은 "이 사진은 80쪽이다"라고 기획 단계에서 이미 의도를 확정하고 만든 것이라,
+  굳이 실측값(노이즈 있음 — 같은 80쪽 안에서도 개별 값이 38.6~99.3까지 벌어짐)을 다시 쓰는 것보다
+  큐레이션값을 직접 쓰는 게 더 안정적이고 예측 가능함. 실측 함수는 이 큐레이션이 의도대로 됐는지
+  검증하는 QA 용도로 유지.
+- **영향 범위**: `taste/photo_catalog_manifest.py` 상단 주석 갱신(참조값의 역할 변경 명시).
+  온보딩 완료 시 축 계산 트리거(다음 이슈, 아직 미착수)를 설계할 때 이 구분(A/B=매니페스트값,
+  무드보드=실측값)을 그대로 반영해야 함.
+
+### 2026-08-15 — recommendations는 별도 엔드포인트 없이 travel의 Pin/Photo API 내부 로직
+- **결정**: API 명세서를 다시 확인한 결과, 추천 관련 내용(최초 추천·재추천·대표사진 관리)은
+  별도의 "recommendations" 섹션이 없고 전부 **5번 섹션(여행 기록 탐색, `/pins/...`,
+  `/photos/...`) 안에 있음** — 5.4(사진 목록의 `is_pin_cover`), 5.5(사진 등록 시 내부적으로
+  최초 추천 계산), 5.6(`POST /pins/{pinId}/representative-photos/refresh`, 재추천),
+  5.7(사진 삭제 시 대표사진 자동 대체). 이 리소스들은 전부 `Pin`/`Photo` 소관이라 **travel
+  앱의 엔드포인트**이며, `recommendations` 앱은 REST 엔드포인트를 직접 갖지 않고 travel의
+  뷰가 내부적으로 호출하는 **스코어링 함수(모듈)만 제공**하는 구조로 확정.
+  기능명세서 5.2.2(추천 사진 개별 추가/제외)는 API 명세서에 대응 엔드포인트가 없는데, 사용자
+  확인 결과 **의도적으로 뺀 게 맞음** — "개별 사진 단위 수정은 제공하지 않는다"(5.6 설명)와
+  일치. `RecommendationEdit` 모델도 이에 따라 불필요 확정.
+- **이유**: `recommendations` 앱 스코프를 정확히 잡아야 실제 구현 범위(엔드포인트 vs 함수)를
+  오판하지 않음 — REST API로 착각하고 뷰/URL을 만들면 travel 앱 영역을 침범하게 됨.
+- **영향 범위**: `recommendations` 앱은 모델도 URL도 없이 스코어링 함수(예:
+  `recommendations/scoring.py`의 `score_photos_by_taste` 등, 2026-08-13 결정 로그 참고)만
+  구현하면 됨. **실제 엔드포인트(5.5/5.6/5.7)는 travel 담당자가 만들고, 그 안에서 이 스코어링
+  함수를 import해서 호출하는 구조** — travel 담당자와 함수 시그니처를 미리 맞춰야 함(연동 지점).
+- **미확정**: 스코어링 함수의 정확한 시그니처(입력: user, pin의 사진 목록 / 출력: 정렬된 사진
+  리스트 등)는 recommendations 착수 시 확정, travel 담당자와 공유 필요.
+
+### 2026-08-15 — 온보딩 완료 시 취향 축 계산 및 taste 텍스트 생성 구현 (#55)
+- **결정**: `taste/onboarding_completion.py`에 `compute_and_save_taste_profile(user)` 구현.
+  `taste/views.py`의 `_advance_progress()`에서 무드보드 2라운드 완료로 `COMPLETED` 전환되는
+  시점에 호출. 축별 가중 평균: brightness/vividness/tone/photo_type은 기본질문 0.4 + A/B 0.4 +
+  무드보드2라운드 실측 0.2, density는 기본질문 0.3 + A/B 0.3 + 무드보드1라운드 실측 0.2 +
+  무드보드2라운드 실측 0.2. `TasteProfile.taste`는 축 값을 구간별(≥60/≤40) 형용사로 변환해
+  조합 + 무드보드1라운드 선택 3장의 거리·방향 라벨 다수결로 구도 선호 문구를 추가해 생성.
+  전체 온보딩 시뮬레이션(기본질문 전부 고값 응답 + A/B 전부 80쪽 선택 + 무드보드1 "가까이" 3장
+  선택)으로 검증 — 5개 축 전부 70대로 계산되고 taste 텍스트에 "가까이·정면 구도를 선호합니다"가
+  정확히 반영됨을 확인.
+  `TasteProfileAxis.value`에 `MinValueValidator(0)`, `MaxValueValidator(100)` 추가(마이그레이션
+  포함) — 명세서에 범위가 명시돼 있진 않으나 기존 0~100 관례를 모델 레벨에서도 강제.
+  `taste/photo_catalog_manifest.py`의 무드보드1라운드(round_no 6) 9장에 거리(가까이/중경/멀리)·
+  방향(정면/측면/뒷모습) 라벨 추가(사용자 확인, 업로드 순서가 3x3 그리드 그대로).
+- **이유**: API 명세서 2.3이 "클라이언트가 직접 호출하지 않는 내부 트리거"로 명시돼 있어 별도
+  공개 엔드포인트 없이 온보딩 완료 로직 안에 구현. 가중치는 기본질문·A/B를 "본 신호", 무드보드를
+  "보정 신호"로 두기로 한 기존 방침(2026-08-14)을 수치화한 것 — 스펙에 정확한 숫자가 없어 이번에
+  임의로 확정.
+- **영향 범위**: `taste/onboarding_completion.py`(신규), `taste/views.py`(`_advance_progress`),
+  `taste/models.py`(`TasteProfileAxis.value` 검증 추가, 마이그레이션 `0002`),
+  `taste/photo_catalog_manifest.py`(무드보드1 라벨 추가).
+- **미확정**: 가중치 수치(0.4/0.4/0.2 등)는 임의로 정한 초기값이라, 실사용 데이터가 쌓이면
+  재조정 가능성 있음.
+
+### 2026-08-15 — PHOTO.is_pin_cover: BOOLEAN → INT(순위) 변경 (travel 확정, 문서 동기화)
+- **결정**: travel 담당자가 `PHOTO.is_pin_cover`를 BOOLEAN(대표사진 여부)에서 **INT(대표사진
+  순위, 1/2/3, 대표사진 아니면 NULL)**로 확정 변경. `docs/Orte_sql_v1.sql`, `docs/spec.md` ERD
+  요약 동기화.
+- **이유**: 사용자가 사진을 업로드할 때 단순히 대표사진 여부만 표시하는 게 아니라, 스코어링
+  결과로 **순위를 매겨서** 추천하는 것으로 확정됨.
+- **영향 범위**: taste/recommendations 직접 모델 변경 없음(travel 소관). 다만 **recommendations
+  스코어링 함수의 출력 형태가 바뀜** — 기존엔 "대표사진 3장 리스트"만 반환하면 됐지만, 이제
+  각 사진에 순위(1/2/3)를 매겨서 반환해야 함. 2026-08-15 앞선 결정(recommendations는 스코어링
+  함수만 제공)의 함수 시그니처 설계 시 이 순위 출력을 반영해야 함.
+- **미확정**: 순위 매기는 함수의 정확한 반환 타입(예: `[(photo_id, rank), ...]` vs 정렬된
+  리스트를 travel 쪽에서 enumerate)은 recommendations 착수 시 travel 담당자와 확정.
+
+### 2026-08-15 — 취향 축 값 수정 API 구현 (#57)
+- **결정**: `PUT /users/me/taste-profile/axes/{axisCode}` (API 명세서 2.5) 구현.
+  `TasteProfileAxis.value`만 수정 가능(`status`는 클라이언트가 못 보냄, 응답 시 항상
+  `REFLECTED`). 저장 즉시 `taste/onboarding_completion.py`의 `regenerate_taste_text(user)`를
+  호출해 `TasteProfile.taste`를 현재 축 값 기준으로 재생성(2.3 내부 트리거). 이 함수는
+  `compute_and_save_taste_profile`(#55)에서 쓰던 텍스트 생성 로직을 분리해 재사용.
+  온보딩을 완료하지 않아 해당 축이 없는 유저가 호출하면 `404 NOT_FOUND`.
+- **이유**: 명세서 2.5 설명 "이 호출은 내부적으로 2.3을 트리거한다"를 그대로 구현. 축 자체가
+  없는 유저 처리 기준은 명세서에 없어 이번에 404로 확정(가장 단순한 기본값).
+- **영향 범위**: `taste/serializers.py`(`TasteProfileAxisUpdateSerializer` 추가),
+  `taste/views.py`(`update_taste_profile_axis`), `taste/urls.py`,
+  `taste/onboarding_completion.py`(`regenerate_taste_text` 분리).
+- **참고(고치지 않기로 함)**: 테스트 중 값 범위 초과 시 에러 응답이 프로젝트 관례
+  (`{success:false, error:{code,message}}`)가 아니라 DRF 기본 형식으로 나가는 걸 발견 —
+  기존 #28/#30 엔드포인트에도 동일하게 있던 문제. API 명세서엔 이 형식이 "모든 에러의 규칙"으로
+  명시된 게 아니라 5.5의 CONFLICT 예시 하나뿐이라, 강제 규약은 아님을 확인 — 지금은 그대로 두고
+  넘어감(고치려면 `config/settings.py`에 공유 예외 핸들러 추가가 필요해 다른 담당자와 협의 필요).
+
+### 2026-08-15 — 취향 프로파일 재학습(7.3) 구현 (#59)
+- **결정**: 별도의 "재학습 시작" 엔드포인트를 만들지 않고, `POST /users/me/basic-question-responses`
+  (2.1)가 `OnboardingProgress.current_stage == COMPLETED` 상태에서 `round_no == 1`로 호출되면
+  재학습 시작으로 간주하도록 확장(`_start_retrain`). 이때 `OnboardingProgress`를
+  `BASIC_QUESTION`/1라운드로 리셋하고 `is_retrain=True`로 표시, 이전 `BasicQuestionResponse`/
+  `SelectionPhoto`를 전부 삭제한 뒤 `ProfileRetrainHistory`(`started_at=now`,
+  `completed_at=None`) row를 생성한다. 온보딩 재완료(`_advance_progress`가 `COMPLETED`로
+  전환) 시 `is_retrain=True`였으면 해당 `ProfileRetrainHistory.completed_at`을 채우고
+  `is_retrain`을 `False`로 리셋 — 이후 흐름은 최초 온보딩과 동일하게
+  `compute_and_save_taste_profile()`이 처리.
+  `ProfileRetrainHistory.completed_at`을 `auto_now_add=True`(row 생성 시 자동 기록)에서
+  `null=True`로 변경 — 시작 시각과 완료 시각이 서로 다른 시점에 기록돼야 하는데 기존 필드로는
+  불가능했음(마이그레이션 `0003`).
+- **이유**: 기능명세서 7.3 "재학습 진행 중에는 기존 프로파일을 유지"는 `compute_and_save_taste_profile`이
+  완료 시점에만 호출되므로 기존 구조로 자연히 충족됨. 이전 `SelectionPhoto`를 지우지 않고
+  재학습을 시작하면, 라운드 완료 판정(해당 round_no의 행 개수 세기)이 재학습 첫 제출만으로
+  "라운드가 이미 다 찼다"고 오판하는 버그가 실제로 재현되어(테스트로 발견) 이전 행을 삭제하는
+  것으로 수정.
+- **영향 범위**: `taste/models.py`(`ProfileRetrainHistory.completed_at`),
+  `taste/migrations/0003_alter_profileretrainhistory_completed_at.py`(신규),
+  `taste/views.py`(`_start_retrain`, `_advance_progress`), `taste/tests.py`(`RetrainFlowTests`).
+- **미확정**: 5.2.2(추천 사진 수정 누적 보정 신호) 초기화는 기능명세서에 "재학습 완료 시 누적된
+  수정 신호 초기화"로 명시돼 있으나, 이 신호 자체가 아직 recommendations 쪽에 구현이 없어
+  이번 범위에서는 처리할 대상이 없음 — recommendations 착수 시 함께 고려.
+
+### 2026-08-15 — GET 2.4 응답에 last_updated_at 추가
+- **결정**: `GET /users/me/taste-profile/axes`(2.4) 응답에 최상위 필드 `last_updated_at`
+  추가(`TasteProfile.last_updated_at`, 온보딩 미완료로 `TasteProfile`이 없으면 `null`).
+  `docs/Orte_API_명세서.md` 2.4 예시도 동일하게 갱신.
+- **이유**: FE가 마이페이지에 "취향 프로파일 마지막 갱신 시각"을 표시해야 하는데, 이 값
+  자체(`TasteProfile.last_updated_at`, `auto_now=True`)는 재학습 완료·2.5 슬라이더 수정·
+  최초 온보딩 완료 시 이미 정확히 갱신되고 있었으나 어떤 응답에도 노출되지 않고 있었음.
+  로직 변경 없이 응답 필드만 추가하면 되는 단순 보강.
+- **영향 범위**: `taste/views.py`(`list_taste_profile_axes`), `taste/tests.py`
+  (`ListTasteProfileAxesViewTests` 추가), `docs/Orte_API_명세서.md` 2.4.
+
+### 2026-08-15 — recommendations 앱 스캐폴딩 및 스코어링 함수 설계 초안
+- **결정**: travel의 `Pin`/`Photo` 모델이 아직 develop에 머지되지 않아 착수는 못 하지만, 미리
+  준비 가능한 부분을 진행. `python manage.py startapp recommendations`로 앱 생성,
+  `config/settings.py`의 `PROJECT_APPS`에 등록(모델 없음, 마이그레이션도 안 생김). 5.2.1/5.2.3
+  기준으로 `recommendations/scoring.py`에 스코어링 함수 설계·구현:
+  - `reduce_similar_photos`: 촬영 시각 근접(120초 이내) + CLIP 임베딩 코사인 유사도(0.9 이상)로
+    유사 사진 축소
+  - `score_photo`: `taste.photo_measurement.measure_all_axes()` 재사용, 유저
+    `TasteProfileAxis`와 축별 절댓값 차이 평균을 100에서 뺀 값을 점수로 사용
+  - `select_initial_recommendations`(5.2.1): 축소 → 스코어링 → 상위 3장
+  - `select_refreshed_recommendations`(5.2.3): 축소 없이 전체 스코어링 → 상위 10장 후보 →
+    3장 무작위 선정(정확히 3장이면 무작위 없이 그대로)
+  - travel 모델 없이도 검증 가능하도록, 사진을 `(photo_id, image, captured_at)` 튜플로 받는
+    duck-typed 인터페이스로 설계 — travel 연동 시 호출부에서 이 형태로 변환해서 넘기면 됨.
+  - `taste/photo_measurement.py`에 `get_image_embedding()` 공개 함수 추가(기존 private
+    CLIP 로딩 재사용) — recommendations가 유사도 판별에 재사용.
+  - 테스트는 taste의 `photo_catalog` 샘플 사진을 알고리즘 검증용으로만 재사용(사진 내용 자체는
+    무의미, 로직 동작만 확인). 11개 전체 통과.
+  - `docs/spec.md` 5.2.3 요약의 "추천 버전을 1 증가시켜 저장" 문구가 API 명세서의 `is_main`
+    플래그 단순화 결정과 어긋나는 것을 발견해 취소선 처리 및 정정.
+- **이유**: travel 브랜치가 리뷰/수정 중이라 당장 못 붙이지만, 알고리즘 설계와 스코어링 로직
+  자체는 travel 모델과 무관하게 미리 만들어둘 수 있어 시간 활용.
+- **영향 범위**: `recommendations/`(신규 앱), `config/settings.py`(`PROJECT_APPS`),
+  `taste/photo_measurement.py`(`get_image_embedding` 추가), `docs/spec.md`(5.2.3 정정).
+- **미확정**: `TIME_PROXIMITY_SECONDS`/`SIMILARITY_THRESHOLD` 구체적 수치는 임의 초기값이라
+  실제 여행 사진으로 재검증 필요. 출력 형식(순위 포함 여부)은 travel 담당자와 연동 시 협의.
+  travel의 `Pin`/`Photo` 모델이 실제로 머지되면 이 스코어링 함수를 travel 뷰(5.5/5.6/5.7)에
+  연결하는 작업이 남음.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

@@ -144,6 +144,7 @@ PROJECT_APPS = [
     'accounts',
     'products',
     'travel',
+    'recommendations',
 ]
 
 THIRD_PARTY_APPS = [
