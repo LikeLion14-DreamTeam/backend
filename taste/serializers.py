@@ -33,3 +33,10 @@ class TasteProfileAxisSerializer(serializers.ModelSerializer):
         model = TasteProfileAxis
         fields = ["axis_code", "value", "status"]
         read_only_fields = fields
+
+
+class TasteProfileAxisUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TasteProfileAxis
+        fields = ["axis_code", "user_id", "value", "status"]
+        read_only_fields = ["axis_code", "user_id", "status"]

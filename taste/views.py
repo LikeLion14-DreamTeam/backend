@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -6,17 +7,19 @@ from rest_framework.response import Response
 from .auth_temp import get_current_user
 from .models import (
     AxisCode,
+    AxisStatus,
     BasicQuestionResponse,
     OnboardingProgress,
     OnboardingStage,
     SelectionPhoto,
     TasteProfileAxis,
 )
-from .onboarding_completion import compute_and_save_taste_profile
+from .onboarding_completion import compute_and_save_taste_profile, regenerate_taste_text
 from .serializers import (
     BasicQuestionResponseSerializer,
     SelectionPhotoSerializer,
     TasteProfileAxisSerializer,
+    TasteProfileAxisUpdateSerializer,
 )
 
 AXIS_CODE_ORDER = [choice.value for choice in AxisCode]
@@ -138,3 +141,17 @@ def list_taste_profile_axes(request):
     axes = TasteProfileAxis.objects.filter(user=user)
     axes = sorted(axes, key=lambda axis: AXIS_CODE_ORDER.index(axis.axis_code))
     return Response({"axes": TasteProfileAxisSerializer(axes, many=True).data})
+
+
+@api_view(["PUT"])
+def update_taste_profile_axis(request, axis_code):
+    user = get_current_user(request)
+    axis = get_object_or_404(TasteProfileAxis, user=user, axis_code=axis_code)
+
+    serializer = TasteProfileAxisUpdateSerializer(axis, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save(status=AxisStatus.REFLECTED)
+
+    regenerate_taste_text(user)
+
+    return Response(TasteProfileAxisUpdateSerializer(axis).data)
