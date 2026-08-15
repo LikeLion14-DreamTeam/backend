@@ -1251,6 +1251,21 @@
   `_trip_current_summary`, `_trip_current_patch`, `_trip_create`),
   `docs/Orte_API_명세서.md`(3.1 갱신 + 3.1+ 신규 섹션).
 
+### 2026-08-16 — 8.2(POST /pins)에 country_code 필드 추가 (프론트 요청)
+- **결정**: 프론트 팀원 요청으로 `POST /pins`(8.2) body에 `country_code`(선택 필드, ISO 3166-1
+  alpha-2, 예: `"KR"`) 추가. 프론트가 값을 보내면 그대로 신뢰해서 국가 도장(3.3, `CountryStamp`)
+  적립에 사용하고, `country_name`으로 매핑 테이블을 계산하던 기존 `resolve_country_code` 호출은
+  생략한다. 값을 안 보내면(구버전 클라이언트 등) 기존처럼 `country_name` → 매핑 테이블 계산으로
+  폴백한다 — `country_codes.py` 매핑 테이블은 제거하지 않고 폴백 용도로 유지.
+  `data.get("country_code") or resolve_country_code(country_name)` 한 줄로 구현.
+- **이유**: 2026-08-14 결정(이슈10)에서 "프론트 지오코딩 SDK마다 포맷이 다를 수 있어 서버가
+  자체 계산"하기로 했던 것과 배치되는 요청이라, 프론트 팀원에게 포맷 통일 여부를 먼저 확인함 —
+  이번엔 프론트가 항상 ISO alpha-2(`KR` 등)로 통일해서 보내기로 확답을 받아 반영. 다만 아직 모든
+  클라이언트(구버전 앱 등)가 이 값을 보낸다는 보장이 없어 매핑 테이블을 완전히 걷어내지 않고
+  안전망으로 남겨둠.
+- **영향 범위**: `travel/serializers.py`(`PinCreateRequestSerializer.country_code`),
+  `travel/views.py`(`pin_create`), `docs/Orte_API_명세서.md`(8.2 Body 예시).
+
 ### 2026-08-15 — recommendations 앱 스캐폴딩 및 스코어링 함수 설계 초안
 - **결정**: travel의 `Pin`/`Photo` 모델이 아직 develop에 머지되지 않아 착수는 못 하지만, 미리
   준비 가능한 부분을 진행. `python manage.py startapp recommendations`로 앱 생성,

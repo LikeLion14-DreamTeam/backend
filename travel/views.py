@@ -125,7 +125,10 @@ def pin_create(request):
                 tag.save(update_fields=["tag_count"])
 
             country_name = data.get("country_name")
-            country_code = resolve_country_code(country_name)
+            # 프론트가 country_code(ISO 3166-1 alpha-2, 예: "KR")를 직접 보내면 그대로 신뢰해서
+            # 쓰고, 안 보내면(구버전 클라이언트 등) 기존처럼 country_name 매핑 테이블로 폴백한다.
+            # 2026-08-16 결정, docs/IMPLEMENTATION.md 참고.
+            country_code = data.get("country_code") or resolve_country_code(country_name)
             if country_code:
                 CountryStamp.objects.get_or_create(
                     user=request.user, country_code=country_code, defaults={"country_name": country_name}

@@ -12,6 +12,7 @@ class PinCreateRequestSerializer(serializers.Serializer):
     address = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=300)
     city = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=100)
     country_name = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=100)
+    country_code = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=10)
     place_name = serializers.CharField(required=False, allow_blank=True, max_length=150, default="")
     text_note = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=500)
     audio_file = serializers.CharField(required=False, allow_null=True)
