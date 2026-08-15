@@ -150,6 +150,7 @@ DJANGO_APPS = [
 
 PROJECT_APPS = [
     'taste',
+    'recommendations',
 ]
 
 THIRD_PARTY_APPS = [
