@@ -10,6 +10,7 @@ from .models import (
     AxisCode,
     BasicQuestionResponse,
     OnboardingProgress,
+    OnboardingStage,
     ProfileRetrainHistory,
     SelectionPhoto,
     TasteProfile,
@@ -396,3 +397,121 @@ class RetrainFlowTests(TestCase):
 
         current_axes = {a.axis_code: a.value for a in TasteProfileAxis.objects.filter(user=self.user)}
         self.assertEqual(current_axes, first_axes)
+
+
+class SubmitBasicQuestionResponseViewTests(TestCase):
+    url = "/users/me/basic-question-responses"
+
+    def setUp(self):
+        self.user = _make_user()
+
+    def test_missing_token_returns_401(self):
+        response = self.client.post(
+            self.url, data={"round_no": 1, "response": "A"}, content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_out_of_order_round_returns_400(self):
+        # progress.current_round은 1부터 시작하는데 2를 먼저 제출
+        response = self.client.post(
+            self.url,
+            data={"round_no": 2, "response": "A"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(BasicQuestionResponse.objects.filter(user=self.user, round_no=2).exists())
+
+    def test_resubmitting_completed_round_without_being_retrain_returns_400(self):
+        OnboardingProgress.objects.create(
+            user=self.user, current_stage=OnboardingStage.AB_SELECTION, current_round=1
+        )
+
+        response = self.client.post(
+            self.url,
+            data={"round_no": 1, "response": "A"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_valid_submission_advances_round(self):
+        response = self.client.post(
+            self.url,
+            data={"round_no": 1, "response": "A"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_round, 2)
+
+
+class SubmitSelectionPhotoViewTests(TestCase):
+    url = "/users/me/selection-photos"
+
+    def setUp(self):
+        self.user = _make_user()
+        # A/B 1라운드가 진행 중인 상태로 세팅
+        OnboardingProgress.objects.create(
+            user=self.user, current_stage=OnboardingStage.AB_SELECTION, current_round=1
+        )
+        self.round1_photos = PHOTO_CATALOG_MANIFEST[1]["sets"][0]["photos"]
+
+    def test_missing_token_returns_401(self):
+        response = self.client.post(self.url, data={}, content_type="application/json")
+        self.assertEqual(response.status_code, 401)
+
+    def test_wrong_round_returns_400(self):
+        photo = PHOTO_CATALOG_MANIFEST[2]["sets"][0]["photos"][0]
+        response = self.client.post(
+            self.url,
+            data={"photo_id": photo["photo_id"], "round_no": 2, "status": True},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_incorrect_selection_count_does_not_advance_round(self):
+        # A/B 라운드는 2장 중 정확히 1장 선택이 기대값 — 0장 선택으로 제출
+        first_response = self.client.post(
+            self.url,
+            data={"photo_id": self.round1_photos[0]["photo_id"], "round_no": 1, "status": False},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+        self.assertEqual(first_response.status_code, 200)
+
+        # 2장째 제출 시점에 라운드가 다 찼는데 선택 0장 -> 400
+        second_response = self.client.post(
+            self.url,
+            data={"photo_id": self.round1_photos[1]["photo_id"], "round_no": 1, "status": False},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+        self.assertEqual(second_response.status_code, 400)
+
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_stage, OnboardingStage.AB_SELECTION)
+        self.assertEqual(progress.current_round, 1)
+
+    def test_correct_selection_advances_to_next_round(self):
+        for photo in self.round1_photos:
+            response = self.client.post(
+                self.url,
+                data={
+                    "photo_id": photo["photo_id"],
+                    "round_no": 1,
+                    "status": photo["value"] == 80,
+                },
+                content_type="application/json",
+                **_auth_headers(self.user),
+            )
+            self.assertEqual(response.status_code, 200)
+
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_round, 2)
