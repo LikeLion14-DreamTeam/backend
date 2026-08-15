@@ -440,6 +440,33 @@
   명시된 게 아니라 5.5의 CONFLICT 예시 하나뿐이라, 강제 규약은 아님을 확인 — 지금은 그대로 두고
   넘어감(고치려면 `config/settings.py`에 공유 예외 핸들러 추가가 필요해 다른 담당자와 협의 필요).
 
+### 2026-08-15 — 취향 프로파일 재학습(7.3) 구현 (#59)
+- **결정**: 별도의 "재학습 시작" 엔드포인트를 만들지 않고, `POST /users/me/basic-question-responses`
+  (2.1)가 `OnboardingProgress.current_stage == COMPLETED` 상태에서 `round_no == 1`로 호출되면
+  재학습 시작으로 간주하도록 확장(`_start_retrain`). 이때 `OnboardingProgress`를
+  `BASIC_QUESTION`/1라운드로 리셋하고 `is_retrain=True`로 표시, 이전 `BasicQuestionResponse`/
+  `SelectionPhoto`를 전부 삭제한 뒤 `ProfileRetrainHistory`(`started_at=now`,
+  `completed_at=None`) row를 생성한다. 온보딩 재완료(`_advance_progress`가 `COMPLETED`로
+  전환) 시 `is_retrain=True`였으면 해당 `ProfileRetrainHistory.completed_at`을 채우고
+  `is_retrain`을 `False`로 리셋 — 이후 흐름은 최초 온보딩과 동일하게
+  `compute_and_save_taste_profile()`이 처리.
+  `ProfileRetrainHistory.completed_at`을 `auto_now_add=True`(row 생성 시 자동 기록)에서
+  `null=True`로 변경 — 시작 시각과 완료 시각이 서로 다른 시점에 기록돼야 하는데 기존 필드로는
+  불가능했음(마이그레이션 `0003`).
+- **이유**: 기능명세서 7.3 "재학습 진행 중에는 기존 프로파일을 유지"는 `compute_and_save_taste_profile`이
+  완료 시점에만 호출되므로 기존 구조로 자연히 충족됨. 이전 `SelectionPhoto`를 지우지 않고
+  재학습을 시작하면, 라운드 완료 판정(해당 round_no의 행 개수 세기)이 재학습 첫 제출만으로
+  "라운드가 이미 다 찼다"고 오판하는 버그가 실제로 재현되어(테스트로 발견) 이전 행을 삭제하는
+  것으로 수정.
+- **영향 범위**: `taste/models.py`(`ProfileRetrainHistory.completed_at`),
+  `taste/migrations/0003_alter_profileretrainhistory_completed_at.py`(신규),
+  `taste/views.py`(`_start_retrain`, `_advance_progress`), `taste/tests.py`(`RetrainFlowTests`).
+- **미확정**: 5.2.2(추천 사진 수정 누적 보정 신호) 초기화는 기능명세서에 "재학습 완료 시 누적된
+  수정 신호 초기화"로 명시돼 있으나, 이 신호 자체가 아직 recommendations 쪽에 구현이 없어
+  이번 범위에서는 처리할 대상이 없음 — recommendations 착수 시 함께 고려.
+
+---
+
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
 
 ```
