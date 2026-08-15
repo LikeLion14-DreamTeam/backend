@@ -11,6 +11,7 @@ from .models import (
     BasicQuestionResponse,
     OnboardingProgress,
     OnboardingStage,
+    ProfileRetrainHistory,
     SelectionPhoto,
     TasteProfileAxis,
 )
@@ -36,6 +37,22 @@ def _validation_error(message):
     )
 
 
+def _start_retrain(progress):
+    """온보딩 완료 상태에서 1라운드가 다시 제출되면 재학습 시작으로 간주한다.
+    별도의 "재학습 시작" 엔드포인트는 두지 않고 2.1(기본 질문 제출)을 그대로 재사용한다.
+
+    이전 온보딩의 BasicQuestionResponse/SelectionPhoto를 지우고 시작한다 — 지우지 않으면
+    이전 라운드의 행이 그대로 남아있어 라운드 완료 판정(행 개수 세기)이 재학습 중 첫 제출만으로
+    "이미 다 찼다"고 잘못 판단하는 문제가 있다."""
+    progress.current_stage = OnboardingStage.BASIC_QUESTION
+    progress.current_round = 1
+    progress.is_retrain = True
+    progress.completed_at = None
+    BasicQuestionResponse.objects.filter(user=progress.user).delete()
+    SelectionPhoto.objects.filter(user=progress.user).delete()
+    ProfileRetrainHistory.objects.create(user=progress.user, started_at=timezone.now())
+
+
 @api_view(["POST"])
 def submit_basic_question_response(request):
     serializer = BasicQuestionResponseSerializer(data=request.data)
@@ -46,7 +63,9 @@ def submit_basic_question_response(request):
     user = get_current_user(request)
     progress, _ = OnboardingProgress.objects.get_or_create(user=user)
 
-    if (
+    if progress.current_stage == OnboardingStage.COMPLETED and round_no == 1:
+        _start_retrain(progress)
+    elif (
         progress.current_stage != OnboardingStage.BASIC_QUESTION
         or progress.current_round != round_no
     ):
@@ -94,6 +113,14 @@ def _advance_progress(progress):
             progress.current_stage = OnboardingStage.COMPLETED
             progress.current_round = 1
             progress.completed_at = timezone.now()
+            if progress.is_retrain:
+                history = ProfileRetrainHistory.objects.filter(
+                    user=progress.user, completed_at__isnull=True
+                ).order_by("-started_at").first()
+                if history is not None:
+                    history.completed_at = timezone.now()
+                    history.save()
+                progress.is_retrain = False
             compute_and_save_taste_profile(progress.user)
         else:
             progress.current_round += 1
