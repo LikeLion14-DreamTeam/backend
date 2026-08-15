@@ -298,6 +298,73 @@
   (`docs/TEMP_NOTES.md` 참고 예정). 실제 측정 함수(HSV/R-B/CLIP+인물크기/사람 감지)와
   `TasteProfile.taste` 텍스트 생성 로직은 별도 이슈에서 구현.
 
+### 2026-08-15 — `open-clip-torch` 설치 완료, Python 상한 버전 고정
+- **결정**: Windows "긴 경로 이름 사용" 옵션을 켠 뒤(`docs/TEMP_NOTES.md` 참고) `open-clip-torch`
+  설치 재시도 → `torchvision` 최신판(0.28.0)이 Python 3.14.1 특정 패치 버전만 배제하는데
+  `pyproject.toml`의 `requires-python = ">=3.12"`가 위쪽을 안 막아놔서 충돌 발생. 실제로 팀 전체가
+  pyenv로 3.12.1에 고정해서 쓰므로 `requires-python`을 `">=3.12,<3.13"`으로 좁혀서 해결.
+  `torch 2.13.0+cpu`, `open_clip 3.3.0`, `cv2 5.0.0` 전부 정상 import 확인.
+- **이유**: 실제 사용 범위를 정직하게 반영하는 제약이라 임시방편이 아님 — 3.13/3.14대 지원은
+  현재 아무도 안 씀.
+- **영향 범위**: `pyproject.toml`(`requires-python`), `poetry.lock`.
+
+### 2026-08-15 — taste 온보딩 사진 실측은 정적 사전계산, recommendations는 런타임 CLIP 필요 (배포 메모)
+- **결정**: taste 온보딩 카탈로그(고정 66장)의 축 실측값은 **CLIP을 배포 서버에서 매번 돌리지
+  않고, 로컬/CI에서 한 번 미리 계산해 정적 데이터로 저장**한다 — 배포 환경엔 CLIP/torch 자체가
+  필요 없어짐. 다만 이건 taste 온보딩에만 해당하고, **`recommendations`(5.2.1, 유저가 매번
+  새로 올리는 여행 사진 스코어링)는 사진이 고정돼 있지 않아 런타임에 CLIP을 실제로 돌려야 함** —
+  이 경우엔 배포 환경에 CLIP 가중치 캐싱(Docker 이미지에 미리 포함 또는 영구 볼륨)이 실제로 필요.
+  비전 LLM API(GPT-4V 등) 대안도 검토했으나, 유저 사진마다 매번 호출되는 고빈도 작업이라 사용량
+  비례 비용·프라이버시(외부로 사진 전송)·외부 API 지연 부담이 있어 자체 호스팅 CLIP을 권장.
+- **이유**: taste와 recommendations는 "사진이 고정 자산인가 매번 새로 올라오는가"가 근본적으로
+  달라서 같은 CLIP 배포 전략을 못 씀 — 이 구분을 착각하면 recommendations 설계 시 "이미 해결된
+  문제"로 잘못 넘어갈 수 있어 명시적으로 기록.
+- **영향 범위**: taste 이번 이슈(측정 함수)는 배포 부담 없음. `recommendations` 앱 착수 시
+  CLIP 가중치 캐싱 인프라를 반드시 별도로 준비해야 함(비용 문제는 현재 우선순위 아님, 확인됨).
+- **미확정**: recommendations의 정확한 배포 방식(Docker 이미지에 가중치 포함 vs 영구 볼륨)은
+  실제 배포 인프라 담당자와 착수 시점에 논의 필요.
+
+### 2026-08-15 — 사진 실측 함수 구현 및 사전계산 완료 (#39)
+- **결정**: `taste/photo_measurement.py`에 5개 축 측정 함수 구현.
+  - brightness/vividness/tone: HSV V·S채널 평균, R−B 채널차 (순수 픽셀 계산, AI 아님)
+  - density: CLIP 제로샷(영어 프롬프트) + Canny 엣지 밀도 50:50 가중 평균
+  - photo_type: 얼굴 DNN(SSD+ResNet, `res10_300x300_ssd_iter_140000.caffemodel`) + 전신/상반신
+    Haar cascade 조합 — 셋 중 하나라도 사람을 감지하면 인물 쪽 점수
+  - `taste/dnn_models/`에 얼굴 검출 모델 파일 2개(약 10MB) 추가(OpenCV 공식 GitHub에서 받음)
+  - `taste/management/commands/precompute_photo_measurements.py` 신규: 카탈로그 66장 전체를
+    측정해 `taste/photo_measurements.py`(정적 데이터)로 저장하는 1회성 개발자 커맨드. 실행 완료.
+  - 테스트는 `photo_measurements.py`(정적 데이터)만 검증 — CLIP/torch를 테스트 시점에 다시
+    돌리지 않아 빠름(15개 테스트 0.014초). A/B 라운드는 참조값(20/80) 대비 방향성만 검증.
+- **이유**: 초기 구현(HOG 사람 감지, 한국어 CLIP 프롬프트, CLIP 단독 density)을 66장 카탈로그로
+  실측 검증한 결과 photo_type이 전부 미검출(10.0 고정), density 신호가 거의 없었음(60.8 vs 62.0).
+  마침 팀원이 2026-08-11에 실제 여행 사진 40장으로 CLIP 단독 vs 하이브리드(규칙기반+DNN 얼굴
+  검출+Haar 전신/상반신+CLIP 구도) 방식을 미리 비교 검증해둔 문서가 있어 그 결론을 그대로 채택.
+  Haar cascade 얼굴 검출 단독은 반복 패턴(키패드 등)을 얼굴로 오탐하는 사례가 실측으로 확인되어
+  DNN으로 교체된 이력이 있음. 이 교체 후 재검증하니 density가 20.8 vs 67.8로, photo_type이
+  15.0 vs 47.6으로 개선되어 5개 축 전부 방향성 테스트를 통과함.
+- **영향 범위**: `taste/photo_measurement.py`(신규), `taste/dnn_models/`(신규, 모델 파일 2개),
+  `taste/management/commands/precompute_photo_measurements.py`(신규), `taste/photo_measurements.py`
+  (신규, 사전계산 결과), `taste/tests.py`(`PhotoMeasurementsTests` 추가), `pyproject.toml`
+  (`opencv-python`을 5.0→4.x로 다운그레이드 — 5.0에 `HOGDescriptor`/`CascadeClassifier`가 아예
+  없는 것을 발견).
+- **미확정**: photo_type 측정이 인물 3장 중 1장을 놓치는 경계 사례가 여전히 있음(팀원의 40장
+  테스트에서도 유사한 경계 사례 1건 보고됨) — A/B 큐레이션이 충분히 극단적이라 축 계산 정확도에
+  큰 영향은 없을 것으로 판단, 추후 실사용 데이터로 재검토. `recommendations` 앱에서 유저 사진에
+  같은 방식(얼굴 DNN+Haar)을 적용할 때도 이 한계를 참고할 것.
+
+### 2026-08-15 — A/B 라운드는 실측값 대신 매니페스트 참조값을 축 계산에 사용
+- **결정**: 온보딩 완료 시 실제 `TasteProfileAxis` 값을 계산할 때, **A/B 라운드(1~5)는
+  `taste/photo_measurements.py`의 실측값이 아니라 `taste/photo_catalog_manifest.py`에 이미
+  있는 큐레이션 참조값(20/80)을 그대로 사용**한다. 무드보드(6~7라운드)는 애초에 참조값이 없으므로
+  기존 계획대로 실측값을 사용한다.
+- **이유**: A/B 사진은 "이 사진은 80쪽이다"라고 기획 단계에서 이미 의도를 확정하고 만든 것이라,
+  굳이 실측값(노이즈 있음 — 같은 80쪽 안에서도 개별 값이 38.6~99.3까지 벌어짐)을 다시 쓰는 것보다
+  큐레이션값을 직접 쓰는 게 더 안정적이고 예측 가능함. 실측 함수는 이 큐레이션이 의도대로 됐는지
+  검증하는 QA 용도로 유지.
+- **영향 범위**: `taste/photo_catalog_manifest.py` 상단 주석 갱신(참조값의 역할 변경 명시).
+  온보딩 완료 시 축 계산 트리거(다음 이슈, 아직 미착수)를 설계할 때 이 구분(A/B=매니페스트값,
+  무드보드=실측값)을 그대로 반영해야 함.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

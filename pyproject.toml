@@ -5,14 +5,15 @@ description = ""
 authors = [
     {name = "hscs12",email = "heesun5795@naver.com"}
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "django (>=6.0.7,<7.0.0)",
     "drf-yasg (>=1.21.15,<2.0.0)",
     "django-cors-headers (>=4.9.0,<5.0.0)",
     "mysqlclient (>=2.2.8,<3.0.0)",
-    "opencv-python (>=5.0.0.93,<6.0.0.0)",
+    "opencv-python (>=4.9,<5.0)",
     "pillow (>=12.3.0,<13.0.0)",
+    "open-clip-torch (>=3.3.0,<4.0.0)",
 ]
 
 
