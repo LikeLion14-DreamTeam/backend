@@ -1203,6 +1203,54 @@
 - **영향 범위**: `taste/views.py`(`list_taste_profile_axes`), `taste/tests.py`
   (`ListTasteProfileAxesViewTests` 추가), `docs/Orte_API_명세서.md` 2.4.
 
+### 2026-08-16 — 3.1(GET /trips/current) 응답에 voice_memo_count 추가
+- **결정**: PM 요청으로 `GET /trips/current` 응답에 `voice_memo_count` 필드 추가. 4.2
+  (`GET /trips/{segmentId}`)에 이미 있는 것과 동일한 방식 — 진행 중(`segment__isnull=True`) 핀들에
+  연결된 `VoiceMemo` 개수를 집계. `has_pins: false`(핀 0개) 응답에도 `voice_memo_count: 0`을
+  포함해 필드 존재를 일관되게 유지.
+- **영향 범위**: `travel/views.py`(`trip_current`), `docs/Orte_API_명세서.md`(3.1 응답 예시).
+
+### 2026-08-16 — 3.1(GET /trips/current) 응답에 name(미리보기) 추가
+- **결정**: PM 요청으로 `GET /trips/current` 응답에 `name` 필드 추가. 진행 중인 여행은
+  `TravelSegment` 레코드 자체가 없어 저장된 이름이 없으므로, 3.2(`POST /trips`)의 자동 이름 생성
+  함수(`_default_trip_name`)를 그대로 재사용해 **매 요청마다 다시 계산하는 실시간 미리보기 값**으로
+  제공(저장하지 않음). `has_pins: false`면 `name: null`.
+- **판단 필요했던 부분(임의로 확정)**:
+  - `_default_trip_name`은 핀을 방문 순서(`tagged_at` 오름차순)로 순회해야 도시 나열 순서가
+    정확한데, 기존 `trip_current`의 `pins` 쿼리셋엔 정렬이 없었음 — `name` 계산 시점에
+    `pins.order_by("tagged_at")`로 별도 정렬해서 사용.
+  - 도시 정보가 있는 핀이 하나도 없을 때(`_default_trip_name`의 날짜 기반 폴백)는 `end_at`이
+    필요한데 진행 중인 여행엔 종료 시각이 없음 — 호출 시점의 `timezone.now()`를 임시 `end_at`으로
+    사용(미리보기 값이라 매 요청 다시 계산되므로 자연스럽게 최신 시각 반영됨).
+- **영향 범위**: `travel/views.py`(`trip_current`), `docs/Orte_API_명세서.md`(3.1 응답 예시).
+
+### 2026-08-16 — PATCH /trips/current 신규 구현 (진행 중 여행 이름 직접 수정)
+- **결정**: PM 요청으로 진행 중인 여행(`TravelSegment` 없는 상태)의 이름을 사용자가 직접 지정할 수
+  있게 함. 저장 위치는 `accounts.models.User.current_trip_name_override`(신규 nullable
+  CharField, max_length=100) — 진행 중인 여행은 유저당 항상 최대 1개(`segment_id IS NULL`인
+  핀 전체)라 유저 단위 필드로 충분하다고 판단.
+  - `GET /trips/current`(3.1): `name` 계산 시 `current_trip_name_override`가 있으면 우선
+    사용, 없으면 기존처럼 `_default_trip_name` 자동 계산.
+  - `PATCH /trips/current`(신규, 3.1+): `name`을 받아 override에 저장. 진행 중인 핀이 0개면
+    `409 CONFLICT`. 빈 문자열(`""`)은 "자동 이름으로 되돌리기" 요청으로 취급해 override를
+    다시 `null`로 리셋 — 별도 DELETE 엔드포인트를 만들지 않고 PATCH 하나로 지정/해제를 다
+    처리하도록 단순화.
+  - 도시가 새로 추가돼도 override 값은 자동으로 바뀌지 않는다(사용자 확인 완료 — "바뀐 내용을
+    유지해야지").
+  - `POST /trips`(3.2, 여행 종료): 이름 우선순위를 "종료 시 직접 입력 > 진행 중 override >
+    자동 계산"으로 확장. 종료 성공 시 override는 소비된 것으로 보고 `null`로 리셋(다음 여행을
+    위해).
+- **이유**: 진행 중 여행은 `TravelSegment` 레코드 자체가 없어(3.2 시점에야 생성) 이름을 저장할
+  기존 테이블이 없었음. 새 모델을 만드는 대신 이미 유저당 1개로 충분한 값이라 `User`에 필드
+  하나 추가하는 것으로 최소 침습적으로 해결.
+- **판단 필요했던 부분(임의로 확정)**: 빈 문자열을 "리셋"으로 처리할지 400 에러로 막을지 —
+  사용자가 실수로 지운 경우 자동 이름으로 자연스럽게 돌아가는 게 낫다고 보고 리셋으로 확정.
+- **영향 범위**: `accounts/models.py`(`User.current_trip_name_override`),
+  `accounts/migrations/0005_user_current_trip_name_override.py`(신규), `travel/serializers.py`
+  (`TripCurrentPatchRequestSerializer`), `travel/views.py`(`trip_current`,
+  `_trip_current_summary`, `_trip_current_patch`, `_trip_create`),
+  `docs/Orte_API_명세서.md`(3.1 갱신 + 3.1+ 신규 섹션).
+
 ### 2026-08-15 — recommendations 앱 스캐폴딩 및 스코어링 함수 설계 초안
 - **결정**: travel의 `Pin`/`Photo` 모델이 아직 develop에 머지되지 않아 착수는 못 하지만, 미리
   준비 가능한 부분을 진행. `python manage.py startapp recommendations`로 앱 생성,

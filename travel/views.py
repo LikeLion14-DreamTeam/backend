@@ -24,6 +24,7 @@ from .serializers import (
     PinCreateRequestSerializer,
     PinUpdateRequestSerializer,
     TripCreateRequestSerializer,
+    TripCurrentPatchRequestSerializer,
     TripPatchRequestSerializer,
 )
 
@@ -158,34 +159,77 @@ def pin_create(request):
     )
 
 
-@api_view(["GET"])
+@api_view(["GET", "PATCH"])
 @authentication_classes([JWTAccessAuthentication])
 @permission_classes([IsAuthenticated])
 def trip_current(request):
     """
     GET /trips/current — 진행 중인 여행 요약 조회 (3.1).
+    PATCH /trips/current — 진행 중인 여행 이름 직접 수정 (신규).
     """
-    pins = Pin.objects.filter(user=request.user, segment__isnull=True)
+    if request.method == "PATCH":
+        return _trip_current_patch(request)
+    return Response(_trip_current_summary(request.user))
+
+
+def _trip_current_summary(user):
+    """3.1 GET과 PATCH 응답에서 공통으로 쓰는 집계 로직."""
+    pins = Pin.objects.filter(user=user, segment__isnull=True)
     pin_count = pins.count()
 
     if pin_count == 0:
-        return Response(
-            {"has_pins": False, "pin_count": 0, "photo_count": 0, "started_at": None, "cities": []}
-        )
+        return {
+            "has_pins": False,
+            "pin_count": 0,
+            "photo_count": 0,
+            "voice_memo_count": 0,
+            "name": None,
+            "started_at": None,
+            "cities": [],
+        }
 
+    ordered_pins = list(pins.order_by("tagged_at"))
     photo_count = Photo.objects.filter(pin__in=pins).count()
+    voice_memo_count = VoiceMemo.objects.filter(pin__in=pins).count()
     started_at = pins.aggregate(Min("tagged_at"))["tagged_at__min"]
     cities = sorted({c for c in pins.exclude(city__isnull=True).exclude(city="").values_list("city", flat=True)})
+    # 진행 중인 여행이라 TravelSegment(및 저장된 name)가 아직 없음. 사용자가 PATCH로 직접 이름을
+    # 지정한 적 있으면(current_trip_name_override) 그 값을 우선 쓰고, 없으면 3.2(POST /trips)와
+    # 동일한 자동 이름 생성 로직으로 "지금 종료하면 이렇게 될 것"이라는 실시간 미리보기를 계산한다.
+    # override가 없을 때의 자동 계산 값은 저장되지 않고 매 요청마다 다시 계산된다.
+    name = user.current_trip_name_override or _default_trip_name(ordered_pins, started_at, timezone.now())
 
-    return Response(
-        {
-            "has_pins": True,
-            "pin_count": pin_count,
-            "photo_count": photo_count,
-            "started_at": started_at,
-            "cities": cities,
-        }
-    )
+    return {
+        "has_pins": True,
+        "pin_count": pin_count,
+        "photo_count": photo_count,
+        "voice_memo_count": voice_memo_count,
+        "name": name,
+        "started_at": started_at,
+        "cities": cities,
+    }
+
+
+def _trip_current_patch(request):
+    """
+    PATCH /trips/current (신규) — 진행 중인 여행 이름 직접 수정.
+    빈 문자열("")은 자동 생성 이름으로 되돌리는 요청으로 취급한다.
+    """
+    serializer = TripCurrentPatchRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    name = serializer.validated_data["name"]
+
+    has_pins = Pin.objects.filter(user=request.user, segment__isnull=True).exists()
+    if not has_pins:
+        return Response(
+            {"message": "수정할 여행이 없습니다.", "code": "CONFLICT"},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    request.user.current_trip_name_override = name or None
+    request.user.save(update_fields=["current_trip_name_override"])
+
+    return Response(_trip_current_summary(request.user))
 
 
 def _default_trip_name(pins, start_at, end_at):
@@ -307,7 +351,11 @@ def _trip_create(request):
             status=status.HTTP_409_CONFLICT,
         )
 
-    name = data.get("name") or _default_trip_name(pins, start_at, end_at)
+    # 이름 우선순위: 종료 시점에 직접 입력 > 진행 중에 PATCH /trips/current로 지정한 이름 >
+    # 자동 생성. (2026-08-16 결정, docs/IMPLEMENTATION.md 참고)
+    name = data.get("name") or request.user.current_trip_name_override or _default_trip_name(
+        pins, start_at, end_at
+    )
 
     with transaction.atomic():
         segment = TravelSegment.objects.create(
@@ -319,6 +367,11 @@ def _trip_create(request):
             pin.segment = segment
             pin.included_in_segment = pin.pin_id in included_ids
         Pin.objects.bulk_update(pins, ["segment", "included_in_segment"])
+
+        if request.user.current_trip_name_override:
+            # 이번 여행에서 소비했으니 다음 진행 중 여행을 위해 리셋한다.
+            request.user.current_trip_name_override = None
+            request.user.save(update_fields=["current_trip_name_override"])
 
         # 2026-08-15: 포토북은 여행 종료 시점에 자동 생성(6번). cover_photo_url은 취향
         # 프로파일 스코어링(5.6/6.4와 동일 로직)이 붙기 전까지 null로 둔다.

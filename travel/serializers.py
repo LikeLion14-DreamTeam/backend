@@ -24,6 +24,16 @@ class TripCreateRequestSerializer(serializers.Serializer):
     end_at = serializers.DateTimeField(required=False, allow_null=True)
 
 
+class TripCurrentPatchRequestSerializer(serializers.Serializer):
+    """PATCH /trips/current 요청 body 검증 (신규 — 진행 중인 여행 이름 수정)
+
+    빈 문자열("")은 자동 생성 이름으로 되돌리는 요청으로 취급한다(user.current_trip_name_override를
+    다시 null로). docs/IMPLEMENTATION.md 참고.
+    """
+
+    name = serializers.CharField(required=True, allow_blank=True, max_length=100)
+
+
 class PinExclusionItemSerializer(serializers.Serializer):
     """PATCH /trips/{segmentId}(4.3) 요청의 pin_exclusions 배열 원소 검증용"""
 
