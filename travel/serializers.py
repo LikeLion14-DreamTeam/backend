@@ -1,6 +1,22 @@
 from rest_framework import serializers
 
 
+class PinCreateRequestSerializer(serializers.Serializer):
+    """
+    POST /pins 요청 body 검증 (8.2)
+    """
+
+    nfc_tag_id = serializers.CharField(required=False, allow_null=True)
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    address = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=300)
+    city = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=100)
+    country_name = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=100)
+    place_name = serializers.CharField(required=False, allow_blank=True, max_length=150, default="")
+    text_note = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=500)
+    audio_file = serializers.CharField(required=False, allow_null=True)
+
+
 class TripCreateRequestSerializer(serializers.Serializer):
     """POST /trips 요청 body 검증 (3.2, 여행 종료)"""
 
