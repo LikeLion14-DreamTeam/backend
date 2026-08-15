@@ -11,26 +11,30 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RemoveField(
-            model_name='user',
-            name='display_name',
+            model_name="user",
+            name="display_name",
         ),
         migrations.RemoveField(
-            model_name='user',
-            name='google_id',
+            model_name="user",
+            name="last_login_at",
         ),
-        migrations.RemoveField(
-            model_name='user',
-            name='last_login_at',
-        ),
-        migrations.AddField(
-            model_name='user',
-            name='account_identifier',
-            field=models.CharField(default='', help_text='구글 ID 토큰의 sub 값. 로그인 시 이 값으로 계정 조회/생성', max_length=150, unique=True),
-            preserve_default=False,
+        migrations.RenameField(
+            model_name="user",
+            old_name="google_id",
+            new_name="account_identifier",
         ),
         migrations.AlterField(
-            model_name='user',
-            name='email',
+            model_name="user",
+            name="account_identifier",
+            field=models.CharField(
+                max_length=150,
+                unique=True,
+                help_text="구글 ID 토큰의 sub 값. 로그인 시 이 값으로 계정 조회/생성",
+            ),
+        ),
+        migrations.AlterField(
+            model_name="user",
+            name="email",
             field=models.EmailField(max_length=150),
         ),
     ]
