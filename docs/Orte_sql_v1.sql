@@ -47,7 +47,7 @@
 --   - TRAVEL_SEGMENT.status, cover_photo_url 존치 여부: 팀 내 논의 중(부록 B),
 --     결론 나기 전까지 컬럼 유지
 --   - TAGGING_SESSION, RECOMMENDATION, TAG_PRODUCT_MAP: 불필요 확정되어 추가 안 함
---     (태깅 세션 개념 자체 제외 확정 / 추천은 PHOTO.is_pin_cover 플래그로 충분 확정 /
+--     (태깅 세션 개념 자체 제외 확정 / 추천은 PHOTO.taste_rank(구 is_pin_cover) 컬럼으로 충분 확정 /
 --      다중 사용자 태깅 시나리오 제외로 매핑·등록 분리 불필요 확정)
 -- =========================================================
 
@@ -151,9 +151,10 @@ CREATE TABLE `PIN` (
 	`included_in_segment`	BOOLEAN	NOT NULL DEFAULT TRUE
 );
 
--- PHOTO.is_pin_cover: BOOLEAN -> INT로 변경(2026-08-15, travel 담당자 확정). 대표사진 순위
--- (1/2/3)를 저장, 대표사진이 아니면 NULL. 추천 스코어링이 단순 플래그가 아니라 순위를 매겨서
--- 추천하는 것으로 확정됨에 따른 변경.
+-- PHOTO.is_pin_cover -> taste_rank로 필드명·타입 변경(2026-08-15, travel 담당자 확정,
+-- BOOLEAN -> INT). 핀에 등록된 사진 전체의 취향 순위(1부터)를 저장 — 대표 1/2/3등뿐 아니라
+-- 사진이 1장이어도 순위가 매겨진다. 추천 스코어링이 단순 플래그가 아니라 핀 전체 사진에 순위를
+-- 매겨서 추천하는 것으로 확정됨에 따른 변경(recommendations 앱, #71에서 실제 연동).
 CREATE TABLE `PHOTO` (
 	`photo_id`	INT	NOT NULL,
 	`pin_id`	INT	NULL,
@@ -162,7 +163,7 @@ CREATE TABLE `PHOTO` (
 	`longitude`	DECIMAL(10,6)	NULL,
 	`source_type`	VARCHAR(30)	NULL,
 	`photo_url`	VARCHAR(500)	NULL,
-	`is_pin_cover`	INT	NULL
+	`taste_rank`	INT	NULL
 );
 
 CREATE TABLE `VOICE_MEMO` (

@@ -1203,6 +1203,54 @@
 - **영향 범위**: `taste/views.py`(`list_taste_profile_axes`), `taste/tests.py`
   (`ListTasteProfileAxesViewTests` 추가), `docs/Orte_API_명세서.md` 2.4.
 
+### 2026-08-16 — 3.1(GET /trips/current) 응답에 voice_memo_count 추가
+- **결정**: PM 요청으로 `GET /trips/current` 응답에 `voice_memo_count` 필드 추가. 4.2
+  (`GET /trips/{segmentId}`)에 이미 있는 것과 동일한 방식 — 진행 중(`segment__isnull=True`) 핀들에
+  연결된 `VoiceMemo` 개수를 집계. `has_pins: false`(핀 0개) 응답에도 `voice_memo_count: 0`을
+  포함해 필드 존재를 일관되게 유지.
+- **영향 범위**: `travel/views.py`(`trip_current`), `docs/Orte_API_명세서.md`(3.1 응답 예시).
+
+### 2026-08-16 — 3.1(GET /trips/current) 응답에 name(미리보기) 추가
+- **결정**: PM 요청으로 `GET /trips/current` 응답에 `name` 필드 추가. 진행 중인 여행은
+  `TravelSegment` 레코드 자체가 없어 저장된 이름이 없으므로, 3.2(`POST /trips`)의 자동 이름 생성
+  함수(`_default_trip_name`)를 그대로 재사용해 **매 요청마다 다시 계산하는 실시간 미리보기 값**으로
+  제공(저장하지 않음). `has_pins: false`면 `name: null`.
+- **판단 필요했던 부분(임의로 확정)**:
+  - `_default_trip_name`은 핀을 방문 순서(`tagged_at` 오름차순)로 순회해야 도시 나열 순서가
+    정확한데, 기존 `trip_current`의 `pins` 쿼리셋엔 정렬이 없었음 — `name` 계산 시점에
+    `pins.order_by("tagged_at")`로 별도 정렬해서 사용.
+  - 도시 정보가 있는 핀이 하나도 없을 때(`_default_trip_name`의 날짜 기반 폴백)는 `end_at`이
+    필요한데 진행 중인 여행엔 종료 시각이 없음 — 호출 시점의 `timezone.now()`를 임시 `end_at`으로
+    사용(미리보기 값이라 매 요청 다시 계산되므로 자연스럽게 최신 시각 반영됨).
+- **영향 범위**: `travel/views.py`(`trip_current`), `docs/Orte_API_명세서.md`(3.1 응답 예시).
+
+### 2026-08-16 — PATCH /trips/current 신규 구현 (진행 중 여행 이름 직접 수정)
+- **결정**: PM 요청으로 진행 중인 여행(`TravelSegment` 없는 상태)의 이름을 사용자가 직접 지정할 수
+  있게 함. 저장 위치는 `accounts.models.User.current_trip_name_override`(신규 nullable
+  CharField, max_length=100) — 진행 중인 여행은 유저당 항상 최대 1개(`segment_id IS NULL`인
+  핀 전체)라 유저 단위 필드로 충분하다고 판단.
+  - `GET /trips/current`(3.1): `name` 계산 시 `current_trip_name_override`가 있으면 우선
+    사용, 없으면 기존처럼 `_default_trip_name` 자동 계산.
+  - `PATCH /trips/current`(신규, 3.1+): `name`을 받아 override에 저장. 진행 중인 핀이 0개면
+    `409 CONFLICT`. 빈 문자열(`""`)은 "자동 이름으로 되돌리기" 요청으로 취급해 override를
+    다시 `null`로 리셋 — 별도 DELETE 엔드포인트를 만들지 않고 PATCH 하나로 지정/해제를 다
+    처리하도록 단순화.
+  - 도시가 새로 추가돼도 override 값은 자동으로 바뀌지 않는다(사용자 확인 완료 — "바뀐 내용을
+    유지해야지").
+  - `POST /trips`(3.2, 여행 종료): 이름 우선순위를 "종료 시 직접 입력 > 진행 중 override >
+    자동 계산"으로 확장. 종료 성공 시 override는 소비된 것으로 보고 `null`로 리셋(다음 여행을
+    위해).
+- **이유**: 진행 중 여행은 `TravelSegment` 레코드 자체가 없어(3.2 시점에야 생성) 이름을 저장할
+  기존 테이블이 없었음. 새 모델을 만드는 대신 이미 유저당 1개로 충분한 값이라 `User`에 필드
+  하나 추가하는 것으로 최소 침습적으로 해결.
+- **판단 필요했던 부분(임의로 확정)**: 빈 문자열을 "리셋"으로 처리할지 400 에러로 막을지 —
+  사용자가 실수로 지운 경우 자동 이름으로 자연스럽게 돌아가는 게 낫다고 보고 리셋으로 확정.
+- **영향 범위**: `accounts/models.py`(`User.current_trip_name_override`),
+  `accounts/migrations/0005_user_current_trip_name_override.py`(신규), `travel/serializers.py`
+  (`TripCurrentPatchRequestSerializer`), `travel/views.py`(`trip_current`,
+  `_trip_current_summary`, `_trip_current_patch`, `_trip_create`),
+  `docs/Orte_API_명세서.md`(3.1 갱신 + 3.1+ 신규 섹션).
+
 ### 2026-08-16 — 8.2(POST /pins)에 country_code 필드 추가 (프론트 요청)
 - **결정**: 프론트 팀원 요청으로 `POST /pins`(8.2) body에 `country_code`(선택 필드, ISO 3166-1
   alpha-2, 예: `"KR"`) 추가. 프론트가 값을 보내면 그대로 신뢰해서 국가 도장(3.3, `CountryStamp`)
@@ -1262,6 +1310,39 @@
   `taste/views.py`(5개 뷰 전부), `taste/auth_temp.py`(삭제), `taste/tests.py`(JWT 기반으로 갱신,
   `_make_user`/`_auth_headers` 헬퍼 추가). `docs/TEMP_NOTES.md` 해당 항목 완료 처리.
 - **미확정**: 없음 — TEMP_NOTES.md에 있던 3단계 계획을 전부 완료.
+
+### 2026-08-15 — recommendations ↔ travel 실제 연동 (#71)
+- **결정**: travel의 `Pin`/`Photo`가 develop에 머지되어(`Photo.taste_rank`: IntegerField,
+  nullable) `recommendations/travel_adapter.py`를 신규 작성해 `scoring.py`와 실제 모델을
+  연결했다.
+  - `rank_pin_photos(pin)`(5.2.1): 핀 생성 시점 사진 전체를 `rank_all_photos()`로 순위 매겨
+    `Photo.taste_rank`에 저장.
+  - `refresh_pin_photos(pin)`(5.6): 호출 시점의 사진 전체(5.5로 나중에 추가된 것 포함)를
+    다시 스코어링해 `taste_rank` 갱신.
+  - 둘 다 사진 다운로드(`requests.get` + `cv2.imdecode`) → `TasteProfileAxis` 조회 →
+    스코어링 → `Photo.objects.bulk_update(["taste_rank"])` 순으로 처리하는 공통 헬퍼
+    `_score_and_save`를 공유. 온보딩 미완료(취향 축 없음)/사진 0장인 핀은 그냥 아무 것도
+    안 함(에러 아님).
+  - **5.6에도 유사 사진 축소를 적용하기로 함(스펙 원문엔 5.2.1에만 명시)**: 처음엔 5.2.3
+    원문에 없다는 이유로 축소 없이 상위 10장/무작위 3장만 구현했으나, 사용자 판단으로
+    "비슷한 사진 3장이 무작위 추천에 한꺼번에 뽑히는 것"을 막기 위해 5.2.1과 같은 로직을
+    통합하기로 결정. `scoring.py`에 `_rank_for_refresh` 공통 헬퍼를 추가해
+    `select_refreshed_recommendations`(3개 photo_id 반환)와 `rank_all_photos_for_refresh`
+    (전체 순위 반환) 둘 다 이 헬퍼를 재사용하도록 리팩터링.
+- **이유**: `taste_rank`가 정수 하나로 순위를 저장하는 구조라, "무작위로 뽑힌 3장"과 "그 외
+  전체 사진"이 서로 겹치지 않는 순위를 받아야 함. 유사 사진 그룹은 대표 1장만 상위 순위
+  경쟁(최초 추천이든 재추천 후보 풀이든)에 참여시키고 나머지는 개별 점수로 뒤에 이어붙이는
+  방식으로, 두 흐름(5.2.1/5.2.3) 모두 "유사 사진 여러 장이 나란히 최상위를 차지하는" 문제를
+  막는다.
+- **영향 범위**: `recommendations/scoring.py`(`_rank_for_refresh`, `rank_all_photos_for_refresh`
+  추가, `select_refreshed_recommendations` 리팩터링), `recommendations/travel_adapter.py`(신규),
+  `recommendations/tests.py`(스코어링 함수 테스트 보강 + `travel_adapter.py`용 `TestCase` 통합
+  테스트 추가, 총 50개).
+- **미확정**: 후보 클러스터 수가 상위 N(3)보다 적을 때(예: 핀에 서로 다른 사진이 2장뿐이고
+  나머지가 전부 그 유사 사진)는 상위권에 같은 클러스터의 중복 사진이 어쩔 수 없이 섞인다 —
+  핀의 모든 사진에 순위를 매겨야 하는 요건상 불가피한 것으로 보고 별도 처리는 하지 않음.
+  travel 담당자가 5.5/5.6 뷰에서 `rank_pin_photos`/`refresh_pin_photos`를 실제로 호출하는
+  작업은 이번 범위에 포함되지 않음(travel 쪽에서 진행).
 
 ---
 

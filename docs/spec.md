@@ -27,7 +27,7 @@
 | 무드보드 2라운드 결과의 축 반영 방식 | 원문에 구체적 반영 방식 없음 | 무드보드 1라운드(캐릭터 각도·거리 9장 중 3장)는 **`density`(구도와 밀도) 축에만** 신호 반영. 무드보드 2라운드(인물·풍경 섞인 다양한 사진 9장 중 3장)는 선택된 3장을 A/B와 동일한 측정 함수로 분석해 **5개 축 전부**에 신호 반영. 별도 축은 만들지 않음 | ✅ 반영 완료 (2026-08-14, 2026-08-15 라운드별 반영 범위 재확정) |
 | TRAVEL_SEGMENT.dates_manually_set 추가 | 원문에 없음 | 4.3(여행 구간 편집)에서 날짜를 사용자가 직접 선택할 수 있게 되면서, "직접 정한 적 있는지"를 서버가 기억해 핀 토글로 인한 자동 재계산이 직접 설정한 날짜를 덮어쓰지 않게 하는 플래그 컬럼 추가 (travel 담당자 전달, ERD 원본에도 반영됨) | ✅ 반영 완료 (2026-08-15, travel 앱 소관 — taste/recommendations 직접 영향 없음, 참고용) |
 | 무드보드 1라운드 "방향" 신호 반영처 (최종) | 원문에 없음 | 거리(distance)는 계속 `density` 축으로, **방향(direction)은 축이 아니라 `TasteProfile.taste` 자유 텍스트 생성 요소로 반영** — 슬라이더 노출·조작 불가, 추천 스코어링에만 내부 사용. 축은 계속 5개 유지 (오늘 여러 번 재검토된 사안의 최종 결론) | ✅ 반영 완료 (2026-08-15, `docs/IMPLEMENTATION.md` 결정 로그 참고) |
-| PHOTO.is_pin_cover 타입 변경 | BOOLEAN(대표사진 여부만 표시) | **INT로 변경, 대표사진 순위(1/2/3) 저장** — 추천이 단순 플래그가 아니라 순위를 매겨서 제공하는 것으로 확정됨에 따라 travel 담당자가 변경. recommendations 스코어링 함수 출력도 boolean이 아니라 순위(rank)를 반환하도록 설계해야 함 | ✅ 반영 완료 (2026-08-15, travel 담당자 확정 전달) |
+| PHOTO.is_pin_cover 타입 변경 | BOOLEAN(대표사진 여부만 표시) | **INT로 변경, 필드명도 `taste_rank`로 확정.** 대표사진 1/2/3등뿐 아니라 **핀에 등록된 사진 전체**가 순위를 받는다(사진이 1장이어도 순위 부여) — 추천이 단순 플래그가 아니라 전체 순위를 매겨서 제공하는 것으로 확정됨에 따라 travel 담당자가 변경. recommendations 스코어링 함수(`scoring.rank_all_photos`/`rank_all_photos_for_refresh`)도 boolean이 아니라 핀의 모든 사진에 대한 순위(rank)를 반환하도록 구현됨(#71) | ✅ 반영 완료 (2026-08-15, travel 담당자 확정 전달 / #71에서 실제 연동) |
 | 취향 축 슬라이더 직접 조작 가능 여부 | (구) 기능명세서: "슬라이더 직접 조작 불가, 값 변경은 재학습·추천 수정으로만 발생" | **API 명세서 2.5가 "축 하나의 값을 마이페이지 슬라이더로 직접 조정"을 명시 — 직접 조작 가능이 최종.** taste #57에서 이렇게 구현 완료. spec.md 3장 "7.2 요약" 문단도 함께 정정 | ✅ 반영 완료 (2026-08-15, taste 최종 점검 중 발견) |
 
 > 검토 필요 항목이 새로 발견되면 이 표에 먼저 추가하고, 결정되면 상태를 ✅로 바꾸면서
@@ -136,7 +136,7 @@
 | longitude | DECIMAL(10,6) | |
 | source_type | VARCHAR(30) | 촬영/업로드 |
 | photo_url | VARCHAR(500) | |
-| is_pin_cover | INT (nullable) | 대표사진 순위(1/2/3), 대표사진 아니면 NULL. 기존 BOOLEAN에서 변경(2026-08-15) |
+| taste_rank | INT (nullable) | 핀에 등록된 사진 전체의 취향 순위(1부터, 사진이 1장이어도 부여). 기존 `is_pin_cover` BOOLEAN에서 필드명·타입 변경(2026-08-15), 수동 새로고침(5.6)에서만 갱신 |
 
 ### VOICE_MEMO
 | 필드 | 타입 | 비고 |
@@ -170,7 +170,7 @@
 > 기능명세서 데이터 항목 기준으로 taste 앱에서 신규 설계가 필요함. 설계 확정 시
 > `docs/IMPLEMENTATION.md`에 필드 정의를 남길 것.
 > `RecommendationResult`/`RecommendationEdit`/`RecommendationRegenHistory`는 만들지 않음 —
-> API 명세서 부록 B의 `PHOTO.is_pin_cover` 플래그 단순화 확정에 따라 불필요. 추천 관련
+> API 명세서 부록 B의 `PHOTO.taste_rank`(구 `is_pin_cover`) 단순화 확정에 따라 불필요. 추천 관련
 > 엔드포인트(5.4~5.7)도 전부 travel 앱 `Pin`/`Photo` API 안에 있어 recommendations 앱은
 > URL도 없이 travel이 호출하는 스코어링 함수만 제공함 (2026-08-15 결정, `docs/IMPLEMENTATION.md` 참고).
 > (`ABSelectionLog`는 검토 후 제외 확정 — `SelectionPhoto`가 A/B+무드보드 선택을 통합 관리. 2026-08-14,
