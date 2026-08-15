@@ -53,3 +53,19 @@ class PinUpdateRequestSerializer(serializers.Serializer):
 
     place_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
     text_note = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=500)
+
+
+class PhotoRegisterItemSerializer(serializers.Serializer):
+    """POST /pins/{pinId}/photos(5.5) 
+    요청의 photos 배열 원소"""
+
+    file_id = serializers.CharField()
+    captured_at = serializers.DateTimeField()
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+
+
+class PhotoRegisterRequestSerializer(serializers.Serializer):
+    """POST /pins/{pinId}/photos(5.5) 요청 body 검증"""
+
+    photos = PhotoRegisterItemSerializer(many=True, allow_empty=False)

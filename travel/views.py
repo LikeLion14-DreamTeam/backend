@@ -1,4 +1,6 @@
 import logging
+from math import atan2, cos, radians, sin, sqrt
+
 
 from django.core import signing
 from django.db import transaction
@@ -16,6 +18,7 @@ from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resol
 from .country_codes import resolve_country_code
 from .models import CountryStamp, Photo, Pin, TravelSegment, VoiceMemo
 from .serializers import (
+    PhotoRegisterRequestSerializer,
     PinCreateRequestSerializer,
     PinUpdateRequestSerializer,
     TripCreateRequestSerializer,
@@ -31,7 +34,7 @@ FILE_RESOLVE_EXCEPTIONS = (
     ValueError,
     PermissionError,
 )
-
+PHOTO_RADIUS_LIMIT_KM = 1.0
 DEFAULT_PAGE_LIMIT = 20
 MAX_PAGE_LIMIT = 100
 
@@ -69,6 +72,13 @@ def _voice_error_response(exc):
         message = str(exc) or "음성 파일을 확인할 수 없습니다."
     return Response({"message": message, "code": "VALIDATION_ERROR"}, status=status.HTTP_400_BAD_REQUEST)
 
+def _distance_km(lat1, lng1, lat2, lng2):
+    """두 좌표 사이 거리(km) — Haversine 공식"""
+    lat1, lng1, lat2, lng2 = (radians(float(v)) for v in (lat1, lng1, lat2, lng2))
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
+    return 6371.0 * 2 * atan2(sqrt(a), sqrt(1 - a))
 
 @api_view(["POST"])
 @authentication_classes([JWTAccessAuthentication])
@@ -124,6 +134,7 @@ def pin_create(request):
                     pin=pin, audio_url=request.build_absolute_uri(relative_url)
                 )
     except FILE_RESOLVE_EXCEPTIONS as exc:
+
         return _voice_error_response(exc)
 
     request_logger.info("POST /pins pin_id=%s user_id=%s", pin.pin_id, request.user.user_id)
@@ -569,47 +580,78 @@ def _pin_detail_delete(pin):
     request_logger.info("DELETE /pins/%s", pin_id)
     return Response(status=status.HTTP_204_NO_CONTENT)
 
-@api_view(["GET"])
+
+@api_view(["GET", "POST"])
 @authentication_classes([JWTAccessAuthentication])
 @permission_classes([IsAuthenticated])
 def pin_photos(request, pin_id):
-    """GET /pins/{pinId}/photos — 핀 전체 사진 조회 (5.4)."""
+    """GET /pins/{pinId}/photos(5.4, 목록) · POST /pins/{pinId}/photos(5.5, 등록).
+
+    같은 경로에 메서드만 다른 두 엔드포인트라 하나의 dispatcher로 묶는다.
+    """
     try:
         pin = Pin.objects.get(pk=pin_id, user=request.user)
     except Pin.DoesNotExist:
         return Response(status=status.HTTP_404_NOT_FOUND)
 
-    return _pin_photos_list(request, pin)
+    if request.method == "GET":
+        return _pin_photos_list(request, pin)
+    return _pin_photos_register(request, pin)
 
+def _pin_photos_register(request, pin):
+    """
+    POST /pins/{pinId}/photos — 사진 등록 (5.5)
+    """
+    pin_id = pin.pin_id
+    if pin.segment_id is not None and pin.included_in_segment:
+        request_logger.info(
+            "POST /pins/%s/photos — 종료된 여정에 포함된 핀, 포토북 재생성 필요하지만 "
+            "photobooks 앱 없어 스킵 (segment_id=%s)",
+            pin_id, pin.segment_id,
+        )
 
-def _pin_photos_list(request, pin):
-    """GET /pins/{pinId}/photos (5.4). photo_id 오름차순(촬영 순서 프록시) 커서 페이지네이션."""
-    cursor_id, limit = _parse_pagination(request)
+    serializer = PhotoRegisterRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    photos_data = serializer.validated_data["photos"]
 
-    qs = Photo.objects.filter(pin=pin).order_by("photo_id")
-    if cursor_id is not None:
-        qs = qs.filter(photo_id__gt=cursor_id)
+    added = []
+    rejected = []
+    for item in photos_data:
+        file_id = item["file_id"]
+        latitude = item.get("latitude")
+        longitude = item.get("longitude")
 
-    photos = list(qs[: limit + 1])
-    next_cursor = None
-    if len(photos) > limit:
-        next_cursor = str(photos[limit - 1].photo_id)
-        photos = photos[:limit]
+        if latitude is None or longitude is None:
+            rejected.append({"file_id": file_id, "reason": "MISSING_COORDINATES"})
+            continue
 
-    return Response(
-        {
-            "photos": [
-                {
-                    "photo_id": p.photo_id,
-                    "captured_at": p.captured_at,
-                    "file_path": p.photo_url,
-                    "is_pin_cover": p.is_main,
-                }
-                for p in photos
-            ],
-            "next_cursor": next_cursor,
-        }
+        if pin.latitude is not None and pin.longitude is not None:
+            distance = _distance_km(pin.latitude, pin.longitude, latitude, longitude)
+            if distance > PHOTO_RADIUS_LIMIT_KM:
+                rejected.append({"file_id": file_id, "reason": "OUT_OF_RADIUS"})
+                continue
+
+        try:
+            relative_url = resolve_and_consume(file_id, user=request.user, expected_file_type="photo")
+        except FILE_RESOLVE_EXCEPTIONS:
+            rejected.append({"file_id": file_id, "reason": "INVALID_FILE"})
+            continue
+
+        photo = Photo.objects.create(
+            pin=pin,
+            captured_at=item["captured_at"],
+            latitude=latitude,
+            longitude=longitude,
+            source_type="uploaded",
+            photo_url=request.build_absolute_uri(relative_url),
+        )
+        added.append({"photo_id": photo.photo_id, "file_id": file_id})
+
+    request_logger.info(
+        "POST /pins/%s/photos added=%s rejected=%s", pin_id, len(added), len(rejected)
     )
+
+    return Response({"added": added, "rejected": rejected})
 
 
 @api_view(["DELETE"])
