@@ -1,3 +1,4 @@
+
 # TEMP_NOTES.md
 
 ## 목적
@@ -13,24 +14,6 @@
 
 ## 진행 중인 임시 조치
 
-### [ ] `taste/auth_temp.py` + 모델 FK — 임시 인증 및 임시 User 참조
-- **임시로 한 것**: accounts 앱의 구글 로그인(JWT)이 아직 없어서, 요청 바디(`user_id`) 또는
-  쿼리 파라미터(`?user_id=`)로 사용자를 조회하는 `get_current_user(request)` 헬퍼로 대체.
-  taste 6개 모델의 user FK는 전부 `settings.AUTH_USER_MODEL`(현재 미설정 → Django 기본
-  `auth.User`)을 참조 중.
-- **정식으로 교체할 조건**: 2026-08-15, accounts 담당자 리뷰로 확인됨 —
-  1) `accounts.User`가 `AbstractBaseUser`를 상속하지 않은 순수 `models.Model`이라
-     `settings.AUTH_USER_MODEL`로 지정할 수 있는 형태가 아님. 그래서 **taste 6개 모델의
-     user FK를 `settings.AUTH_USER_MODEL` 대신 `accounts.User`로 직접 교체**해야 함
-     (마이그레이션 필요).
-  2) `taste/auth_temp.py`도 `get_user_model()` 대신 `accounts.models.User`를 직접 import하도록
-     교체.
-  3) `request.user`를 실제로 채워주는 인증 미들웨어/DRF 인증 클래스가 accounts 쪽에 준비되면,
-     `get_current_user()` 내부를 `request.user` 반환으로 교체.
-  **accounts 앱이 `develop`에 머지된 뒤에** 진행 가능 (현재 `feature/13-google-login`에만 있고
-  로컬 브랜치 트리에 `accounts/` 자체가 없어 지금은 import 자체가 불가능).
-- **관련 이슈/커밋**: #28(`taste/auth_temp.py` 최초 도입), #26(모델 FK 최초 설계)
-
 ### [ ] recommendations 앱 CLIP 런타임 배포 (미착수)
 - **임시로 한 것**: taste 온보딩 카탈로그는 정적 사전계산으로 CLIP 배포 부담을 없앴지만,
   recommendations(5.2.1, 유저 업로드 사진 스코어링)는 사진이 매번 새로 올라와서 런타임에 CLIP을
@@ -42,6 +25,17 @@
 ---
 
 ## 완료된 항목
+
+### [x] `taste/auth_temp.py` + 모델 FK — 임시 인증 및 임시 User 참조
+- **임시로 한 것**: accounts 앱의 구글 로그인(JWT)이 아직 없어서, 요청 바디(`user_id`) 또는
+  쿼리 파라미터(`?user_id=`)로 사용자를 조회하는 `get_current_user(request)` 헬퍼로 대체.
+  taste 6개 모델의 user FK는 `settings.AUTH_USER_MODEL`(Django 기본 `auth.User`)을 참조 중이었음.
+- **정식으로 교체한 것**: taste 6개 모델의 user FK를 `accounts.models.User`로 직접 교체
+  (마이그레이션 `0004_alter_basicquestionresponse_user_and_more`). `taste/auth_temp.py` 삭제,
+  taste 5개 뷰에 `accounts.authentication.JWTAccessAuthentication` +
+  `rest_framework.permissions.IsAuthenticated` 적용, `request.user`로 사용자 조회하도록 전환
+  (travel 앱과 동일 패턴). 테스트도 실제 `AccessToken.for_user()`로 발급한 JWT 기반으로 갱신.
+- **완료**: #69, 2026-08-15
 
 ### [x] A/B·무드보드 사진 실물 파일 — 백엔드 접근 가능한 저장소 부재
 - **임시로 한 것**: 사진 실물이 팀 구글 드라이브에만 있고 백엔드가 분석 가능한 저장소에는 없었음.
