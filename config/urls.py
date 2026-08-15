@@ -26,4 +26,5 @@ urlpatterns = [
     path('api/test/', test_connection),
     path('', include('accounts.urls')),
     path('', include('products.urls')),
+    path('', include('travel.urls')),
 ]
