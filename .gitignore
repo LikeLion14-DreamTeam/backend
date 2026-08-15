@@ -199,4 +199,5 @@ scripts/
 docker-compose.yml
 
 # 구글 로그인 테스트용 로컬 HTML (GitHub 비공개 — 한 번도 커밋된 적 없음)
-google_login_test.html
+google_login_test.htmldocker-compose.local.yml.bak
+.DS_Store
