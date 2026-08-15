@@ -568,3 +568,99 @@ def _pin_detail_delete(pin):
     pin.delete()
     request_logger.info("DELETE /pins/%s", pin_id)
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(["GET"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def pin_photos(request, pin_id):
+    """GET /pins/{pinId}/photos — 핀 전체 사진 조회 (5.4)."""
+    try:
+        pin = Pin.objects.get(pk=pin_id, user=request.user)
+    except Pin.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    return _pin_photos_list(request, pin)
+
+
+def _pin_photos_list(request, pin):
+    """GET /pins/{pinId}/photos (5.4). photo_id 오름차순(촬영 순서 프록시) 커서 페이지네이션."""
+    cursor_id, limit = _parse_pagination(request)
+
+    qs = Photo.objects.filter(pin=pin).order_by("photo_id")
+    if cursor_id is not None:
+        qs = qs.filter(photo_id__gt=cursor_id)
+
+    photos = list(qs[: limit + 1])
+    next_cursor = None
+    if len(photos) > limit:
+        next_cursor = str(photos[limit - 1].photo_id)
+        photos = photos[:limit]
+
+    return Response(
+        {
+            "photos": [
+                {
+                    "photo_id": p.photo_id,
+                    "captured_at": p.captured_at,
+                    "file_path": p.photo_url,
+                    "is_pin_cover": p.is_main,
+                }
+                for p in photos
+            ],
+            "next_cursor": next_cursor,
+        }
+    )
+
+
+@api_view(["DELETE"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def photo_delete(request, photo_id):
+    """
+    DELETE /photos/{photoId} — 사진 삭제 (5.7)
+    """
+    try:
+        photo = Photo.objects.select_related("pin").get(pk=photo_id, pin__user=request.user)
+    except Photo.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    pin = photo.pin
+    was_main = photo.is_main
+    photo.delete()
+
+    if was_main:
+        replacement = Photo.objects.filter(pin=pin, is_main=False).order_by("?").first()
+        if replacement is not None:
+            replacement.is_main = True
+            replacement.save(update_fields=["is_main"])
+
+    request_logger.info("DELETE /photos/%s pin_id=%s was_main=%s", photo_id, pin.pin_id, was_main)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def pin_voice_memos(request, pin_id):
+    """
+    GET /pins/{pinId}/voice-memos — 음성 메모 조회 (5.8)
+    """
+    try:
+        pin = Pin.objects.get(pk=pin_id, user=request.user)
+    except Pin.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    voice_memo = getattr(pin, "voicememo", None)
+    return Response(
+        {
+            "voice_memo": (
+                {
+                    "voice_memo_id": voice_memo.voice_memo_id,
+                    "audio_file": voice_memo.audio_url,
+                    "saved_at": voice_memo.saved_at,
+                }
+                if voice_memo
+                else None
+            )
+        }
+    )
