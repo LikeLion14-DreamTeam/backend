@@ -18,4 +18,9 @@ urlpatterns = [
         views.list_taste_profile_axes,
         name="taste-profile-axes",
     ),
+    path(
+        "users/me/taste-profile/axes/<str:axis_code>",
+        views.update_taste_profile_axis,
+        name="taste-profile-axis-update",
+    ),
 ]

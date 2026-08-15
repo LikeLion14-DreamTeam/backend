@@ -422,7 +422,23 @@
 - **미확정**: 순위 매기는 함수의 정확한 반환 타입(예: `[(photo_id, rank), ...]` vs 정렬된
   리스트를 travel 쪽에서 enumerate)은 recommendations 착수 시 travel 담당자와 확정.
 
----
+### 2026-08-15 — 취향 축 값 수정 API 구현 (#57)
+- **결정**: `PUT /users/me/taste-profile/axes/{axisCode}` (API 명세서 2.5) 구현.
+  `TasteProfileAxis.value`만 수정 가능(`status`는 클라이언트가 못 보냄, 응답 시 항상
+  `REFLECTED`). 저장 즉시 `taste/onboarding_completion.py`의 `regenerate_taste_text(user)`를
+  호출해 `TasteProfile.taste`를 현재 축 값 기준으로 재생성(2.3 내부 트리거). 이 함수는
+  `compute_and_save_taste_profile`(#55)에서 쓰던 텍스트 생성 로직을 분리해 재사용.
+  온보딩을 완료하지 않아 해당 축이 없는 유저가 호출하면 `404 NOT_FOUND`.
+- **이유**: 명세서 2.5 설명 "이 호출은 내부적으로 2.3을 트리거한다"를 그대로 구현. 축 자체가
+  없는 유저 처리 기준은 명세서에 없어 이번에 404로 확정(가장 단순한 기본값).
+- **영향 범위**: `taste/serializers.py`(`TasteProfileAxisUpdateSerializer` 추가),
+  `taste/views.py`(`update_taste_profile_axis`), `taste/urls.py`,
+  `taste/onboarding_completion.py`(`regenerate_taste_text` 분리).
+- **참고(고치지 않기로 함)**: 테스트 중 값 범위 초과 시 에러 응답이 프로젝트 관례
+  (`{success:false, error:{code,message}}`)가 아니라 DRF 기본 형식으로 나가는 걸 발견 —
+  기존 #28/#30 엔드포인트에도 동일하게 있던 문제. API 명세서엔 이 형식이 "모든 에러의 규칙"으로
+  명시된 게 아니라 5.5의 CONFLICT 예시 하나뿐이라, 강제 규약은 아님을 확인 — 지금은 그대로 두고
+  넘어감(고치려면 `config/settings.py`에 공유 예외 핸들러 추가가 필요해 다른 담당자와 협의 필요).
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
 

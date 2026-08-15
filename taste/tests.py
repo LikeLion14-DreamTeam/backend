@@ -190,3 +190,52 @@ class OnboardingCompletionTests(TestCase):
         for axis_code, value in axes.items():
             with self.subTest(axis_code=axis_code):
                 self.assertLess(value, 50)
+
+
+class UpdateTasteProfileAxisViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create(username="axis_update_test_user")
+        self.axis = TasteProfileAxis.objects.create(user=self.user, axis_code="brightness", value=50)
+        TasteProfile.objects.create(user=self.user, taste="")
+        self.url = "/users/me/taste-profile/axes/brightness"
+
+    def test_valid_update_returns_reflected(self):
+        response = self.client.put(
+            self.url,
+            data={"value": 70, "user_id": self.user.pk},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "axis_code": "brightness",
+            "user_id": self.user.pk,
+            "value": 70,
+            "status": "REFLECTED",
+        })
+        self.axis.refresh_from_db()
+        self.assertEqual(self.axis.value, 70)
+
+    def test_out_of_range_value_returns_400(self):
+        response = self.client.put(
+            self.url,
+            data={"value": 150, "user_id": self.user.pk},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nonexistent_axis_returns_404(self):
+        response = self.client.put(
+            "/users/me/taste-profile/axes/vividness",
+            data={"value": 70, "user_id": self.user.pk},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_update_regenerates_taste_text(self):
+        self.client.put(
+            self.url,
+            data={"value": 80, "user_id": self.user.pk},
+            content_type="application/json",
+        )
+        profile = TasteProfile.objects.get(user=self.user)
+        self.assertIn("밝은", profile.taste)

@@ -141,6 +141,18 @@ def _build_taste_text(axis_values, composition_phrase):
     return " ".join(parts)
 
 
+def regenerate_taste_text(user):
+    """현재 저장된 TasteProfileAxis 값 + 무드보드1라운드 구도 선호를 기준으로
+    TasteProfile.taste 텍스트를 다시 생성해 저장한다 (API 명세서 2.3 트리거).
+    온보딩 완료 직후(축 재계산 후)와 2.5(축 값 수동 수정) 양쪽에서 재사용한다."""
+    axis_values = {
+        axis.axis_code: axis.value for axis in TasteProfileAxis.objects.filter(user=user)
+    }
+    composition_phrase = _composition_phrase(user)
+    taste_text = _build_taste_text(axis_values, composition_phrase)
+    TasteProfile.objects.update_or_create(user=user, defaults={"taste": taste_text})
+
+
 def compute_and_save_taste_profile(user):
     axis_values = {axis_code: _compute_axis_value(user, axis_code) for axis_code in AxisCode.values}
 
@@ -151,6 +163,4 @@ def compute_and_save_taste_profile(user):
             user=user, axis_code=axis_code, defaults={"value": value, "status": AxisStatus.REFLECTED}
         )
 
-    composition_phrase = _composition_phrase(user)
-    taste_text = _build_taste_text(axis_values, composition_phrase)
-    TasteProfile.objects.update_or_create(user=user, defaults={"taste": taste_text})
+    regenerate_taste_text(user)
