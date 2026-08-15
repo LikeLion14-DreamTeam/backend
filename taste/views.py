@@ -1,10 +1,12 @@
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .auth_temp import get_current_user
+from accounts.authentication import JWTAccessAuthentication
+
 from .models import (
     AxisCode,
     AxisStatus,
@@ -55,13 +57,15 @@ def _start_retrain(progress):
 
 
 @api_view(["POST"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
 def submit_basic_question_response(request):
     serializer = BasicQuestionResponseSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     round_no = serializer.validated_data["round_no"]
     answer = serializer.validated_data["answer"]
 
-    user = get_current_user(request)
+    user = request.user
     progress, _ = OnboardingProgress.objects.get_or_create(user=user)
 
     if progress.current_stage == OnboardingStage.COMPLETED and round_no == 1:
@@ -129,6 +133,8 @@ def _advance_progress(progress):
 
 
 @api_view(["POST"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
 def submit_selection_photo(request):
     serializer = SelectionPhotoSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -136,7 +142,7 @@ def submit_selection_photo(request):
     photo_id = serializer.validated_data["photo_id"]
     is_selected = serializer.validated_data["status"]
 
-    user = get_current_user(request)
+    user = request.user
     progress, _ = OnboardingProgress.objects.get_or_create(user=user)
 
     expected_round_no = _progress_round_no(progress)
@@ -164,8 +170,10 @@ def submit_selection_photo(request):
 
 
 @api_view(["GET"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
 def list_taste_profile_axes(request):
-    user = get_current_user(request)
+    user = request.user
     axes = TasteProfileAxis.objects.filter(user=user)
     axes = sorted(axes, key=lambda axis: AXIS_CODE_ORDER.index(axis.axis_code))
 
@@ -179,8 +187,10 @@ def list_taste_profile_axes(request):
 
 
 @api_view(["PUT"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
 def update_taste_profile_axis(request, axis_code):
-    user = get_current_user(request)
+    user = request.user
     axis = get_object_or_404(TasteProfileAxis, user=user, axis_code=axis_code)
 
     serializer = TasteProfileAxisUpdateSerializer(axis, data=request.data, partial=True)
