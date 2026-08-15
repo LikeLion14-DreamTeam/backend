@@ -230,12 +230,40 @@ Method `GET` · EndPoint `/trips/current` · 인증 필요
 Response
 ```json
 {
-    "has_pins": true, "pin_count": 7, "photo_count": 41,
+    "has_pins": true, "pin_count": 7, "photo_count": 41, "voice_memo_count": 3,
+    "name": "도쿄, 요코하마",
     "started_at": "2026-08-01T09:00:00.000000Z",
     "cities": ["도쿄", "요코하마"]
 }
 ```
 `has_pins: false`면 빈 상태(클라이언트는 태깅 유도 문구 표시).
+`name`은 사용자가 아래 3.1+(`PATCH /trips/current`)로 직접 지정한 값이 있으면 그 값을, 없으면
+3.2(`POST /trips`)와 동일한 자동 이름 생성 로직으로 매 요청마다 계산하는 미리보기 값을 반환한다
+("지금 종료하면 이렇게 될 것"). `has_pins: false`면 `null`.
+
+## 3.1+ 진행 중인 여행 이름 수정 (신규)
+
+진행 중인 여행(`TRAVEL_SEGMENT`가 아직 없는 상태)의 표시 이름을 사용자가 직접 지정/수정한다. 저장된
+값은 여행을 종료할 때(3.2)까지 유지되며, 종료 시 `name`을 별도로 입력하지 않으면 이 값이 그대로
+최종 이름이 된다. 도시가 추가로 태깅돼도 이 값은 자동으로 바뀌지 않는다.
+
+Method `PATCH` · EndPoint `/trips/current` · 인증 필요
+
+Body
+```json
+{ "name": "나만의 여행 제목" }
+```
+Response — 3.1(`GET /trips/current`)과 동일한 형태로, 수정 직후 최신 상태를 반환한다.
+```json
+{
+    "has_pins": true, "pin_count": 7, "photo_count": 41, "voice_memo_count": 3,
+    "name": "나만의 여행 제목",
+    "started_at": "2026-08-01T09:00:00.000000Z",
+    "cities": ["도쿄", "요코하마"]
+}
+```
+- `name`을 빈 문자열(`""`)로 보내면 직접 지정한 이름을 지우고 자동 생성 이름으로 되돌린다.
+- 진행 중인 핀이 0개면(수정할 여행 자체가 없음) `409 CONFLICT`.
 
 ## 3.2 여행 종료(여정 생성)
 
@@ -671,7 +699,7 @@ Response
 |---|---|
 | 1.1~1.4 / 1.5 | `/auth/*`, `/users/me`, `/events/permissions` |
 | 2.1~2.5 | `/users/me/basic-question-responses`, `/users/me/selection-photos`, `/users/me/taste-profile*` |
-| 3.1~3.3 | `/trips/current`, `/trips`(POST), `/users/me/country-stamps` |
+| 3.1~3.3 | `/trips/current`(GET/PATCH), `/trips`(POST), `/users/me/country-stamps` |
 | 4.1~4.5 | `/trips`, `/trips/{id}`, `/trips/{id}/pins` |
 | 5.1~5.8 | `/pins/{id}`, `/pins/{id}/photos`, `/pins/{id}/representative-photos/refresh`, `/photos/{id}`, `/pins/{id}/voice-memos` |
 | 6.1~6.4 | `/photobooks`, `/photobooks/{id}`, `/photobooks/{id}/cover/refresh` |
