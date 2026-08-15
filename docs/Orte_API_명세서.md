@@ -298,11 +298,40 @@ Response
 ```json
 {
     "stamps": [
-        { "country_code": 82, "country_name": "대한민국" },
-        { "country_code": 81, "country_name": "일본" }
+        {
+            "country_code": "KR", "country_name": "대한민국",
+            "pin_count": 12, "cities": ["서울", "부산", "제주"], "extra_city_count": 2
+        },
+        {
+            "country_code": "JP", "country_name": "일본",
+            "pin_count": 3, "cities": ["도쿄"], "extra_city_count": 0
+        }
     ]
 }
 ```
+- `cities`는 그 나라 안에서 핀 수가 많은 도시 순으로 최대 3개. `extra_city_count`는 3개를 넘는 도시 수(예: 총 5개 도시면 `2`).
+- `country_code`는 ISO 3166-1 alpha-2 (8.2에서 결정된 값과 동일한 값).
+
+## 3.3.1 국가 도장 탭 → 국가별 핀 목록
+
+여권 페이지에서 국가 도장을 선택했을 때, 그 나라에 저장된 핀만(여행 구간 배정 여부와 무관하게) 지도에 표시하기 위한 조회. 동선은 표시하지 않는다.
+
+Method `GET` · EndPoint `/pins` · 인증 필요 · Param `{ "country_code": "KR", "cursor": null, "limit": 20 }`
+
+Response
+```json
+{
+    "pins": [
+        {
+            "pin_id": 101, "latitude": 35.660, "longitude": 139.702,
+            "place_name": "시부야", "photo_count": 3, "tagged_at": "..."
+        }
+    ],
+    "next_cursor": null
+}
+```
+- `country_code`는 필수 — 없으면 `400 VALIDATION_ERROR`.
+- `POST /pins`(8.2)와 같은 경로를 메서드로만 구분한다.
 
 ---
 
@@ -667,7 +696,8 @@ Body
 `city`/`country_name`/`country_code`는 전부 선택 필드다. `country_code`(ISO 3166-1 alpha-2, 예: `"KR"`)는
 프론트가 직접 계산해서 보낼 수 있고, 보내면 그 값을 그대로 신뢰해 국가 도장(3.3)에 사용한다. 보내지
 않으면 서버가 `country_name`을 `travel/country_codes.py`의 매핑 테이블로 변환해 대신 계산한다(구버전
-클라이언트 호환용 폴백).
+클라이언트 호환용 폴백). 이렇게 확정된 `country_code`는 핀에도 저장되어 3.3.1(`GET /pins?country_code=`)
+필터링에 쓰인다.
 Response
 ```json
 {
@@ -711,7 +741,7 @@ Response
 |---|---|
 | 1.1~1.4 / 1.5 | `/auth/*`, `/users/me`, `/events/permissions` |
 | 2.1~2.5 | `/users/me/basic-question-responses`, `/users/me/selection-photos`, `/users/me/taste-profile*` |
-| 3.1~3.3 | `/trips/current`(GET/PATCH), `/trips`(POST), `/users/me/country-stamps` |
+| 3.1~3.3 | `/trips/current`(GET/PATCH), `/trips`(POST), `/users/me/country-stamps`, `/pins`(GET, 국가 필터) |
 | 4.1~4.5 | `/trips`, `/trips/{id}`, `/trips/{id}/pins` |
 | 5.1~5.8 | `/pins/{id}`, `/pins/{id}/photos`, `/pins/{id}/representative-photos/refresh`, `/photos/{id}`, `/pins/{id}/voice-memos` |
 | 6.1~6.4 | `/photobooks`, `/photobooks/{id}`, `/photobooks/{id}/cover/refresh` |
