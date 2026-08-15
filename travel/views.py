@@ -15,7 +15,7 @@ from accounts.authentication import JWTAccessAuthentication
 from photobooks.models import Photobook
 from photobooks.services import build_photobook_pins, recompute_photo_layout_for_pin
 from products.models import NfcTag
-from recommendations.travel_adapter import rank_pin_photos
+from recommendations.travel_adapter import rank_pin_photos, refresh_pin_photos
 from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
 
 from .country_codes import resolve_country_code
@@ -41,6 +41,7 @@ FILE_RESOLVE_EXCEPTIONS = (
 PHOTO_RADIUS_LIMIT_KM = 1.0
 DEFAULT_PAGE_LIMIT = 20
 MAX_PAGE_LIMIT = 100
+REPRESENTATIVE_PHOTO_MIN_COUNT = 4
 
 
 def _parse_pagination(request):
@@ -799,6 +800,45 @@ def _pin_photos_register(request, pin):
     )
 
     return Response({"added": added, "rejected": rejected})
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def pin_photos_refresh(request, pin_id):
+    """
+    POST /pins/{pinId}/representative-photos/refresh — 대표사진 새로고침 (5.6)
+    """
+    try:
+        pin = Pin.objects.get(pk=pin_id, user=request.user)
+    except Pin.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    photo_count = Photo.objects.filter(pin=pin).count()
+    if photo_count < REPRESENTATIVE_PHOTO_MIN_COUNT:
+        return Response(
+            {
+                "message": f"대표사진 새로고침은 사진이 {REPRESENTATIVE_PHOTO_MIN_COUNT}장 이상일 때만 가능합니다.",
+                "code": "CONFLICT",
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    refresh_pin_photos(pin)
+
+    representative_photos = Photo.objects.filter(
+        pin=pin, taste_rank__isnull=False, taste_rank__lte=3
+    ).order_by("taste_rank")
+
+    request_logger.info("POST /pins/%s/representative-photos/refresh", pin_id)
+
+    return Response(
+        {
+            "representative_photos": [
+                {"photo_id": p.photo_id, "url": p.photo_url} for p in representative_photos
+            ]
+        }
+    )
 
 
 @api_view(["DELETE"])

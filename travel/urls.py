@@ -6,6 +6,11 @@ urlpatterns = [
     path("pins", views.pin_create, name="pin-create"),
     path("pins/<int:pin_id>", views.pin_detail, name="pin-detail"),
     path("pins/<int:pin_id>/photos", views.pin_photos, name="pin-photos"),
+    path(
+        "pins/<int:pin_id>/representative-photos/refresh",
+        views.pin_photos_refresh,
+        name="pin-photos-refresh",
+    ),
     path("pins/<int:pin_id>/voice-memos", views.pin_voice_memos, name="pin-voice-memos"),
     path("photos/<int:photo_id>", views.photo_delete, name="photo-delete"),
     path("trips/current", views.trip_current, name="trip-current"),
