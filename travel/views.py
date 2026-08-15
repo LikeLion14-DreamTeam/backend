@@ -1,7 +1,7 @@
 import logging
 
 from django.db import transaction
-from django.db.models import Min
+from django.db.models import Count, Min
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -10,9 +10,33 @@ from rest_framework.response import Response
 from accounts.authentication import JWTAccessAuthentication
 
 from .models import Photo, Pin, TravelSegment
-from .serializers import TripCreateRequestSerializer
+from .serializers import TripCreateRequestSerializer, TripPatchRequestSerializer
 
 request_logger = logging.getLogger("request_logger")
+
+DEFAULT_PAGE_LIMIT = 20
+MAX_PAGE_LIMIT = 100
+
+
+def _parse_pagination(request):
+    """
+    cursor/limit 쿼리 파라미터 파싱
+    """
+    limit_raw = request.query_params.get("limit")
+    try:
+        limit = int(limit_raw) if limit_raw is not None else DEFAULT_PAGE_LIMIT
+    except ValueError:
+        limit = DEFAULT_PAGE_LIMIT
+    limit = max(1, min(limit, MAX_PAGE_LIMIT))
+
+    cursor_raw = request.query_params.get("cursor")
+    cursor_id = None
+    if cursor_raw:
+        try:
+            cursor_id = int(cursor_raw)
+        except ValueError:
+            cursor_id = None
+    return cursor_id, limit
 
 
 @api_view(["GET"])
@@ -65,14 +89,47 @@ def _default_trip_name(pins, start_at, end_at):
     return f"{start_date}~{end_date} 여행"
 
 
-@api_view(["POST"])
+@api_view(["GET", "POST"])
 @authentication_classes([JWTAccessAuthentication])
 @permission_classes([IsAuthenticated])
 def trip_list_or_create(request):
     """
+    GET /trips — 여행 구간 목록 (4.1)
     POST /trips — 여행 종료(여정 생성) (3.2)
     """
+    if request.method == "GET":
+        return _trip_list(request)
     return _trip_create(request)
+
+
+def _trip_list(request):
+    """GET /trips (4.1). segment_id 내림차순 커서 페이지네이션"""
+    cursor_id, limit = _parse_pagination(request)
+
+    qs = TravelSegment.objects.filter(user=request.user).order_by("-segment_id")
+    if cursor_id is not None:
+        qs = qs.filter(segment_id__lt=cursor_id)
+
+    segments = list(qs[: limit + 1])
+    next_cursor = None
+    if len(segments) > limit:
+        next_cursor = str(segments[limit - 1].segment_id)
+        segments = segments[:limit]
+
+    return Response(
+        {
+            "trips": [
+                {
+                    "segment_id": s.segment_id,
+                    "name": s.name,
+                    "start_at": s.start_at,
+                    "end_at": s.end_at,
+                }
+                for s in segments
+            ],
+            "next_cursor": next_cursor,
+        }
+    )
 
 
 def _trip_create(request):
@@ -130,4 +187,196 @@ def _trip_create(request):
             "photobook_id": None,
         },
         status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def trip_detail(request, segment_id):
+    """
+    GET/PATCH/DELETE /trips/{segmentId} — 여행 구간 상세/수정/삭제 (4.2~4.4)
+    """
+    try:
+        segment = TravelSegment.objects.get(pk=segment_id, user=request.user)
+    except TravelSegment.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return _trip_detail_get(segment)
+    if request.method == "PATCH":
+        return _trip_detail_patch(request, segment)
+    return _trip_detail_delete(segment)
+
+
+def _trip_detail_get(segment):
+    """
+    GET /trips/{segmentId} (4.2)
+    """
+    included = Pin.objects.filter(segment=segment, included_in_segment=True)
+    pin_count = included.count()
+    photo_count = Photo.objects.filter(pin__in=included).count()
+
+    return Response(
+        {
+            "segment_id": segment.segment_id,
+            "user_id": segment.user_id,
+            "name": segment.name,
+            "start_at": segment.start_at,
+            "end_at": segment.end_at,
+            "status": segment.status,
+            "pin_count": pin_count,
+            "photo_count": photo_count,
+        }
+    )
+
+
+def _trip_detail_patch(request, segment):
+    """
+    PATCH /trips/{segmentId} (4.3)
+    이름 수정, 시작/종료일 직접 수정, 및/또는 핀 제외·재포함
+    """
+    serializer = TripPatchRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    exclusions = data.get("pin_exclusions") or []
+    pin_ids = [item["pin_id"] for item in exclusions]
+
+    pins_by_id = {}
+    if pin_ids:
+        pins_qs = Pin.objects.filter(pin_id__in=pin_ids, segment=segment, user=request.user)
+        pins_by_id = {p.pin_id: p for p in pins_qs}
+        missing = [pid for pid in pin_ids if pid not in pins_by_id]
+        if missing:
+            return Response(
+                {
+                    "message": f"이 여행에 속하지 않은 핀입니다: {missing}",
+                    "code": "VALIDATION_ERROR",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    dates_given = "start_at" in data or "end_at" in data
+    if dates_given:
+        new_start = data.get("start_at") or segment.start_at
+        new_end = data.get("end_at") or segment.end_at
+        if new_start and new_end and new_start > new_end:
+            return Response(
+                {"message": "start_at은 end_at보다 늦을 수 없습니다.", "code": "VALIDATION_ERROR"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    with transaction.atomic():
+        if data.get("name"):
+            segment.name = data["name"]
+
+        if dates_given:
+            segment_pins = list(Pin.objects.filter(segment=segment))
+            for pin in segment_pins:
+                pin.included_in_segment = new_start <= pin.tagged_at <= new_end
+            Pin.objects.bulk_update(segment_pins, ["included_in_segment"])
+
+            segment.start_at = new_start
+            segment.end_at = new_end
+            segment.dates_manually_set = True
+
+        if exclusions:
+            pins_to_update = []
+            for item in exclusions:
+                pin = pins_by_id[item["pin_id"]]
+                pin.included_in_segment = item["included_in_segment"]
+                pins_to_update.append(pin)
+            Pin.objects.bulk_update(pins_to_update, ["included_in_segment"])
+
+        included = list(Pin.objects.filter(segment=segment, included_in_segment=True).order_by("tagged_at"))
+        if not included:
+            transaction.set_rollback(True)
+            return Response(
+                {"message": "포함된 핀이 없어 저장할 수 없습니다.", "code": "VALIDATION_ERROR"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not dates_given and not segment.dates_manually_set and exclusions:
+            segment.start_at = included[0].tagged_at
+            segment.end_at = included[-1].tagged_at
+
+        segment.save(update_fields=["name", "start_at", "end_at", "dates_manually_set"])
+
+    photo_count = Photo.objects.filter(pin__in=included).count()
+
+    if exclusions:
+        request_logger.info(
+            "PATCH /trips/%s pin_exclusions 반영 — 포토북 재생성은 스킵(photobooks 앱 없음)",
+            segment.segment_id,
+        )
+
+    return Response(
+        {
+            "segment_id": segment.segment_id,
+            "name": segment.name,
+            "start_at": segment.start_at,
+            "end_at": segment.end_at,
+            "pin_count": len(included),
+            "photo_count": photo_count,
+        }
+    )
+
+
+def _trip_detail_delete(segment):
+    """DELETE /trips/{segmentId} (4.4)
+    cascade로 핀/사진/음성메모까지 삭제
+    """
+    segment_id = segment.segment_id
+    segment.delete()
+    request_logger.info(
+        "DELETE /trips/%s — cascade 삭제(핀/사진/음성메모)", segment_id
+    )
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def trip_pins(request, segment_id):
+    """
+    GET /trips/{segmentId}/pins — 구간 내 핀 목록 (4.5)
+    """
+    try:
+        TravelSegment.objects.get(pk=segment_id, user=request.user)
+    except TravelSegment.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    cursor_id, limit = _parse_pagination(request)
+
+    qs = (
+        Pin.objects.filter(segment_id=segment_id, user=request.user)
+        .annotate(photo_count=Count("photos"))
+        .order_by("pin_id")
+    )
+    if cursor_id is not None:
+        qs = qs.filter(pin_id__gt=cursor_id)
+
+    pins = list(qs[: limit + 1])
+    next_cursor = None
+    if len(pins) > limit:
+        next_cursor = str(pins[limit - 1].pin_id)
+        pins = pins[:limit]
+
+    return Response(
+        {
+            "pins": [
+                {
+                    "pin_id": p.pin_id,
+                    "place_name": p.place_name,
+                    "latitude": p.latitude,
+                    "longitude": p.longitude,
+                    "photo_count": p.photo_count,
+                    "tagged_at": p.tagged_at,
+                    "included_in_segment": p.included_in_segment,
+                }
+                for p in pins
+            ],
+            "next_cursor": next_cursor,
+        }
     )
