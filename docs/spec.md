@@ -159,14 +159,18 @@
 |---|---|---|
 | accounts | 계정·인증 | User, Session |
 | taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, SelectionPhoto, ProfileRetrainHistory |
-| recommendations | 추천 | RecommendationResult, RecommendationEdit, RecommendationRegenHistory |
+| recommendations | 추천 | (모델·URL 없음 — 스코어링 함수만, 아래 참고) |
 | products | NFC 제품 | NfcTag |
 | travel | 여행 기록 핵심 | TravelSegment, Pin, TaggingSession, Photo, VoiceMemo, CountryStamp |
 | photobooks | 포토북 | Photobook, PhotobookPin, PhotobookPhotoLayout |
 
-> 참고: `OnboardingProgress`, `ProfileRetrainHistory`, `RecommendationResult`, `RecommendationEdit`,
-> `RecommendationRegenHistory`는 ERD 다이어그램에는 아직 반영되지 않았고 기능명세서 데이터 항목 기준으로
-> taste/recommendations 앱에서 신규 설계가 필요함. 설계 확정 시 `docs/IMPLEMENTATION.md`에 필드 정의를 남길 것.
+> 참고: `OnboardingProgress`, `ProfileRetrainHistory`는 ERD 다이어그램에는 아직 반영되지 않았고
+> 기능명세서 데이터 항목 기준으로 taste 앱에서 신규 설계가 필요함. 설계 확정 시
+> `docs/IMPLEMENTATION.md`에 필드 정의를 남길 것.
+> `RecommendationResult`/`RecommendationEdit`/`RecommendationRegenHistory`는 만들지 않음 —
+> API 명세서 부록 B의 `PHOTO.is_pin_cover` 플래그 단순화 확정에 따라 불필요. 추천 관련
+> 엔드포인트(5.4~5.7)도 전부 travel 앱 `Pin`/`Photo` API 안에 있어 recommendations 앱은
+> URL도 없이 travel이 호출하는 스코어링 함수만 제공함 (2026-08-15 결정, `docs/IMPLEMENTATION.md` 참고).
 > (`ABSelectionLog`는 검토 후 제외 확정 — `SelectionPhoto`가 A/B+무드보드 선택을 통합 관리. 2026-08-14,
 > `docs/IMPLEMENTATION.md` 결정 로그 참고)
 
