@@ -185,6 +185,7 @@ Method `GET` · EndPoint `/users/me/taste-profile/axes` · 인증 필요
 Response
 ```json
 {
+    "last_updated_at": "2026-08-15T09:10:00.000000Z",
     "axes": [
         { "axis_code": "brightness", "value": 62, "status": "REFLECTED" },
         { "axis_code": "vividness", "value": 40, "status": "REFLECTED" },
@@ -195,6 +196,7 @@ Response
 }
 ```
 `status`: `REFLECTED`(반영 완료) / `PENDING`(미반영). 현재는 2.5가 동기 처리라 실질적으로 항상 `REFLECTED`이며, `PENDING`은 추천 로직이 무거워져 비동기로 전환될 경우를 대비한 필드다.
+`last_updated_at`: 축 값이 마지막으로 갱신된 시각(재학습 완료·2.5 슬라이더 수정·온보딩 최초 완료 시 갱신). 온보딩을 아직 완료하지 않아 `TasteProfile`이 없으면 `null`. (2026-08-15 추가 — FE에서 마지막 갱신 시각 표시 필요로 확인됨)
 
 ## 2.5 취향 축 값 수정
 
