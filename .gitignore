@@ -180,3 +180,23 @@ cython_debug/
 secrets.json
 
 errors.log
+
+# 로컬 전용 문서 (GitHub 비공개 — 아직 한 번도 커밋된 적 없는 것들만)
+docs/API_CHANGES.md
+docs/PM_DECISIONS.md
+docs/issues_draft.md
+docs/travel_issues_draft.md
+docs/Orte_API_명세서_최종.md
+docs/.DS_Store
+
+# postman 컬렉션 (로컬 전용, GitHub 비공개 — 한 번도 커밋된 적 없음)
+postman/
+
+# 로컬 테스트용 스크립트 (로컬 전용, GitHub 비공개 — 한 번도 커밋된 적 없음)
+scripts/
+
+# 로컬 전용 docker-compose (GitHub 비공개 — 한 번도 커밋된 적 없음, 이미 develop에 별도 설정 있음)
+docker-compose.yml
+
+# 구글 로그인 테스트용 로컬 HTML (GitHub 비공개 — 한 번도 커밋된 적 없음)
+google_login_test.html
