@@ -13,6 +13,7 @@ from .models import (
     OnboardingStage,
     ProfileRetrainHistory,
     SelectionPhoto,
+    TasteProfile,
     TasteProfileAxis,
 )
 from .onboarding_completion import compute_and_save_taste_profile, regenerate_taste_text
@@ -167,7 +168,14 @@ def list_taste_profile_axes(request):
     user = get_current_user(request)
     axes = TasteProfileAxis.objects.filter(user=user)
     axes = sorted(axes, key=lambda axis: AXIS_CODE_ORDER.index(axis.axis_code))
-    return Response({"axes": TasteProfileAxisSerializer(axes, many=True).data})
+
+    profile = TasteProfile.objects.filter(user=user).first()
+    last_updated_at = profile.last_updated_at if profile else None
+
+    return Response({
+        "last_updated_at": last_updated_at,
+        "axes": TasteProfileAxisSerializer(axes, many=True).data,
+    })
 
 
 @api_view(["PUT"])
