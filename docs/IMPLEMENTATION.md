@@ -1248,6 +1248,39 @@
   `_make_user`/`_auth_headers` 헬퍼 추가). `docs/TEMP_NOTES.md` 해당 항목 완료 처리.
 - **미확정**: 없음 — TEMP_NOTES.md에 있던 3단계 계획을 전부 완료.
 
+### 2026-08-15 — recommendations ↔ travel 실제 연동 (#71)
+- **결정**: travel의 `Pin`/`Photo`가 develop에 머지되어(`Photo.taste_rank`: IntegerField,
+  nullable) `recommendations/travel_adapter.py`를 신규 작성해 `scoring.py`와 실제 모델을
+  연결했다.
+  - `rank_pin_photos(pin)`(5.2.1): 핀 생성 시점 사진 전체를 `rank_all_photos()`로 순위 매겨
+    `Photo.taste_rank`에 저장.
+  - `refresh_pin_photos(pin)`(5.6): 호출 시점의 사진 전체(5.5로 나중에 추가된 것 포함)를
+    다시 스코어링해 `taste_rank` 갱신.
+  - 둘 다 사진 다운로드(`requests.get` + `cv2.imdecode`) → `TasteProfileAxis` 조회 →
+    스코어링 → `Photo.objects.bulk_update(["taste_rank"])` 순으로 처리하는 공통 헬퍼
+    `_score_and_save`를 공유. 온보딩 미완료(취향 축 없음)/사진 0장인 핀은 그냥 아무 것도
+    안 함(에러 아님).
+  - **5.6에도 유사 사진 축소를 적용하기로 함(스펙 원문엔 5.2.1에만 명시)**: 처음엔 5.2.3
+    원문에 없다는 이유로 축소 없이 상위 10장/무작위 3장만 구현했으나, 사용자 판단으로
+    "비슷한 사진 3장이 무작위 추천에 한꺼번에 뽑히는 것"을 막기 위해 5.2.1과 같은 로직을
+    통합하기로 결정. `scoring.py`에 `_rank_for_refresh` 공통 헬퍼를 추가해
+    `select_refreshed_recommendations`(3개 photo_id 반환)와 `rank_all_photos_for_refresh`
+    (전체 순위 반환) 둘 다 이 헬퍼를 재사용하도록 리팩터링.
+- **이유**: `taste_rank`가 정수 하나로 순위를 저장하는 구조라, "무작위로 뽑힌 3장"과 "그 외
+  전체 사진"이 서로 겹치지 않는 순위를 받아야 함. 유사 사진 그룹은 대표 1장만 상위 순위
+  경쟁(최초 추천이든 재추천 후보 풀이든)에 참여시키고 나머지는 개별 점수로 뒤에 이어붙이는
+  방식으로, 두 흐름(5.2.1/5.2.3) 모두 "유사 사진 여러 장이 나란히 최상위를 차지하는" 문제를
+  막는다.
+- **영향 범위**: `recommendations/scoring.py`(`_rank_for_refresh`, `rank_all_photos_for_refresh`
+  추가, `select_refreshed_recommendations` 리팩터링), `recommendations/travel_adapter.py`(신규),
+  `recommendations/tests.py`(스코어링 함수 테스트 보강 + `travel_adapter.py`용 `TestCase` 통합
+  테스트 추가, 총 50개).
+- **미확정**: 후보 클러스터 수가 상위 N(3)보다 적을 때(예: 핀에 서로 다른 사진이 2장뿐이고
+  나머지가 전부 그 유사 사진)는 상위권에 같은 클러스터의 중복 사진이 어쩔 수 없이 섞인다 —
+  핀의 모든 사진에 순위를 매겨야 하는 요건상 불가피한 것으로 보고 별도 처리는 하지 않음.
+  travel 담당자가 5.5/5.6 뷰에서 `rank_pin_photos`/`refresh_pin_photos`를 실제로 호출하는
+  작업은 이번 범위에 포함되지 않음(travel 쪽에서 진행).
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
