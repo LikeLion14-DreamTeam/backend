@@ -96,6 +96,23 @@ class SelectInitialRecommendationsTests(SimpleTestCase):
         result = select_initial_recommendations(photos, taste_axes)
         self.assertEqual(len(result), 1)
 
+    def test_empty_photos_returns_empty_list(self):
+        taste_axes = {"brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
+        result = select_initial_recommendations([], taste_axes)
+        self.assertEqual(result, [])
+
+    def test_result_is_ordered_by_score_descending(self):
+        base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
+        photos = [
+            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i))
+            for i, photo_id in enumerate([1001, 1002, 2001, 2002])
+        ]
+        taste_axes = {"brightness": 90, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
+        result = select_initial_recommendations(photos, taste_axes)
+        photo_by_id = {p[0]: p[1] for p in photos}
+        scores = [score_photo(photo_by_id[photo_id], taste_axes) for photo_id in result]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
 
 class SelectRefreshedRecommendationsTests(SimpleTestCase):
     def _photos(self, photo_ids):
@@ -122,3 +139,8 @@ class SelectRefreshedRecommendationsTests(SimpleTestCase):
         taste_axes = {"brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
         result = select_refreshed_recommendations(photos, taste_axes)
         self.assertEqual(set(result), {1001, 1002})
+
+    def test_empty_photos_returns_empty_list(self):
+        taste_axes = {"brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
+        result = select_refreshed_recommendations([], taste_axes)
+        self.assertEqual(result, [])

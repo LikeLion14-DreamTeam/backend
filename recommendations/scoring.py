@@ -24,12 +24,20 @@ travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드
 4. 재추천(`select_refreshed_recommendations`, 5.2.3) — 유사 사진 축소 없이 전체 스코어링 →
    상위 10장 후보(10장 미만이면 전체, 정확히 3장이면 무작위 없이 그대로) → 그중 3장 무작위 선정.
 
+## 출력 형식 (확정)
+`select_initial_recommendations`/`select_refreshed_recommendations`는 **점수 높은 순으로 정렬된
+`photo_id` 리스트**를 반환한다. 리스트의 순서 자체가 순위다 — 별도로 순위 숫자를 담은 튜플을
+반환하지 않는다. `PHOTO.is_main`이 순위(INT)를 저장하는 형태라면, 호출부(travel)에서
+`for rank, photo_id in enumerate(result, start=1): ...`로 순위를 매기면 된다. 이 편이 스코어링
+함수를 travel의 특정 필드 타입에 묶지 않아 더 안정적이다.
+
 ## 아직 미정 (travel 연동 시 확정 필요)
 - `TIME_PROXIMITY_SECONDS`/`SIMILARITY_THRESHOLD` 구체적인 수치 — 지금은 임의로 잡은 초기값,
   실제 여행 사진으로 재검증 필요.
-- 출력 형식: 지금은 정렬된 `photo_id` 리스트만 반환. `PHOTO.is_main`이 순위(INT)로 바뀌면
-  `[(photo_id, rank), ...]` 형태로 바꿀지, travel 쪽에서 리스트 순서로 enumerate할지 —
-  travel 담당자와 협의 필요 (2026-08-15 결정 로그 참고).
+
+## 빈 입력 처리
+사진이 0장이면 두 함수 모두 빈 리스트를 반환한다(에러 아님) — 핀에 사진이 아직 하나도 없는
+상태를 별도 분기 없이 자연스럽게 처리하도록 설계됨.
 """
 
 import random
