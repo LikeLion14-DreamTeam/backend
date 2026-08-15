@@ -3,6 +3,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("pins", views.pin_create, name="pin-create"),
     path("trips/current", views.trip_current, name="trip-current"),
     path("trips", views.trip_list_or_create, name="trip-list-or-create"),
     path("trips/<int:segment_id>", views.trip_detail, name="trip-detail"),

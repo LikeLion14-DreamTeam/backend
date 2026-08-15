@@ -1,18 +1,31 @@
 import logging
 
+from django.core import signing
 from django.db import transaction
-from django.db.models import Count, Min
+from django.db.models import Count, F, Min
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.authentication import JWTAccessAuthentication
+from products.models import NfcTag
+from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
 
-from .models import Photo, Pin, TravelSegment
-from .serializers import TripCreateRequestSerializer, TripPatchRequestSerializer
+from .country_codes import resolve_country_code
+from .models import CountryStamp, Photo, Pin, TravelSegment, VoiceMemo
+from .serializers import PinCreateRequestSerializer, TripCreateRequestSerializer, TripPatchRequestSerializer
 
 request_logger = logging.getLogger("request_logger")
+
+FILE_RESOLVE_EXCEPTIONS = (
+    signing.BadSignature,
+    FileNotUploadedError,
+    FileAlreadyConsumedError,
+    ValueError,
+    PermissionError,
+)
 
 DEFAULT_PAGE_LIMIT = 20
 MAX_PAGE_LIMIT = 100
@@ -37,6 +50,93 @@ def _parse_pagination(request):
         except ValueError:
             cursor_id = None
     return cursor_id, limit
+
+
+def _voice_error_response(exc):
+    if isinstance(exc, PermissionError):
+        return Response(
+            {"message": "본인이 업로드한 파일이 아닙니다.", "code": "PERMISSION_DENIED"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if isinstance(exc, signing.BadSignature):
+        message = "유효하지 않거나 만료된 audio_file입니다."
+    else:
+        message = str(exc) or "음성 파일을 확인할 수 없습니다."
+    return Response({"message": message, "code": "VALIDATION_ERROR"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def pin_create(request):
+    """
+    POST /pins — 촬영 결과로 핀 생성 (8.2)
+    """
+    serializer = PinCreateRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+
+    nfc_tag_id = data.get("nfc_tag_id")
+    tag = None
+    if nfc_tag_id:
+        tag = NfcTag.objects.filter(pk=nfc_tag_id, user=request.user, unlinked_at__isnull=True).first()
+        if tag is None:
+            return Response(
+                {"message": "등록되지 않은 태그입니다. 먼저 태그를 연결해주세요.", "code": "VALIDATION_ERROR"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    try:
+        with transaction.atomic():
+            pin = Pin.objects.create(
+                user=request.user,
+                segment=None,
+                latitude=data.get("latitude"),
+                longitude=data.get("longitude"),
+                address=data.get("address"),
+                city=data.get("city"),
+                place_name=data.get("place_name", ""),
+                tagged_at=timezone.now(),
+                text_note=data.get("text_note"),
+            )
+
+            if tag is not None:
+                tag.tag_count = F("tag_count") + 1
+                tag.save(update_fields=["tag_count"])
+
+            country_name = data.get("country_name")
+            country_code = resolve_country_code(country_name)
+            if country_code:
+                CountryStamp.objects.get_or_create(
+                    user=request.user, country_code=country_code, defaults={"country_name": country_name}
+                )
+
+            voice_memo = None
+            audio_file = data.get("audio_file")
+            if audio_file:
+                relative_url = resolve_and_consume(audio_file, user=request.user, expected_file_type="voice")
+                voice_memo = VoiceMemo.objects.create(
+                    pin=pin, audio_url=request.build_absolute_uri(relative_url)
+                )
+    except FILE_RESOLVE_EXCEPTIONS as exc:
+        return _voice_error_response(exc)
+
+    request_logger.info("POST /pins pin_id=%s user_id=%s", pin.pin_id, request.user.user_id)
+
+    return Response(
+        {
+            "pin_id": pin.pin_id,
+            "segment_id": None,
+            "latitude": pin.latitude,
+            "longitude": pin.longitude,
+            "address": pin.address,
+            "place_name": pin.place_name,
+            "tagged_at": pin.tagged_at,
+            "text_note": pin.text_note,
+            "voice_memo": {"voice_memo_id": voice_memo.voice_memo_id} if voice_memo else None,
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(["GET"])
