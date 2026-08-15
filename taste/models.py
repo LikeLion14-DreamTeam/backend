@@ -1,6 +1,7 @@
-from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+from accounts.models import User
 
 
 class AxisCode(models.TextChoices):
@@ -25,7 +26,7 @@ class OnboardingStage(models.TextChoices):
 
 class TasteProfile(models.Model):
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         primary_key=True,
         related_name="taste_profile",
@@ -39,7 +40,7 @@ class TasteProfile(models.Model):
 
 class TasteProfileAxis(models.Model):
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         related_name="taste_axes",
     )
@@ -58,7 +59,7 @@ class TasteProfileAxis(models.Model):
 
 class BasicQuestionResponse(models.Model):
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         related_name="basic_question_responses",
     )
@@ -83,7 +84,7 @@ class SelectionPhoto(models.Model):
     """
 
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         related_name="selection_photos",
     )
@@ -101,7 +102,7 @@ class SelectionPhoto(models.Model):
 
 class OnboardingProgress(models.Model):
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         primary_key=True,
         related_name="onboarding_progress",
@@ -123,7 +124,7 @@ class OnboardingProgress(models.Model):
 
 class ProfileRetrainHistory(models.Model):
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         related_name="profile_retrain_history",
     )
