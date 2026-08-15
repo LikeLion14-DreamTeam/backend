@@ -385,6 +385,30 @@
 - **미확정**: 스코어링 함수의 정확한 시그니처(입력: user, pin의 사진 목록 / 출력: 정렬된 사진
   리스트 등)는 recommendations 착수 시 확정, travel 담당자와 공유 필요.
 
+### 2026-08-15 — 온보딩 완료 시 취향 축 계산 및 taste 텍스트 생성 구현 (#55)
+- **결정**: `taste/onboarding_completion.py`에 `compute_and_save_taste_profile(user)` 구현.
+  `taste/views.py`의 `_advance_progress()`에서 무드보드 2라운드 완료로 `COMPLETED` 전환되는
+  시점에 호출. 축별 가중 평균: brightness/vividness/tone/photo_type은 기본질문 0.4 + A/B 0.4 +
+  무드보드2라운드 실측 0.2, density는 기본질문 0.3 + A/B 0.3 + 무드보드1라운드 실측 0.2 +
+  무드보드2라운드 실측 0.2. `TasteProfile.taste`는 축 값을 구간별(≥60/≤40) 형용사로 변환해
+  조합 + 무드보드1라운드 선택 3장의 거리·방향 라벨 다수결로 구도 선호 문구를 추가해 생성.
+  전체 온보딩 시뮬레이션(기본질문 전부 고값 응답 + A/B 전부 80쪽 선택 + 무드보드1 "가까이" 3장
+  선택)으로 검증 — 5개 축 전부 70대로 계산되고 taste 텍스트에 "가까이·정면 구도를 선호합니다"가
+  정확히 반영됨을 확인.
+  `TasteProfileAxis.value`에 `MinValueValidator(0)`, `MaxValueValidator(100)` 추가(마이그레이션
+  포함) — 명세서에 범위가 명시돼 있진 않으나 기존 0~100 관례를 모델 레벨에서도 강제.
+  `taste/photo_catalog_manifest.py`의 무드보드1라운드(round_no 6) 9장에 거리(가까이/중경/멀리)·
+  방향(정면/측면/뒷모습) 라벨 추가(사용자 확인, 업로드 순서가 3x3 그리드 그대로).
+- **이유**: API 명세서 2.3이 "클라이언트가 직접 호출하지 않는 내부 트리거"로 명시돼 있어 별도
+  공개 엔드포인트 없이 온보딩 완료 로직 안에 구현. 가중치는 기본질문·A/B를 "본 신호", 무드보드를
+  "보정 신호"로 두기로 한 기존 방침(2026-08-14)을 수치화한 것 — 스펙에 정확한 숫자가 없어 이번에
+  임의로 확정.
+- **영향 범위**: `taste/onboarding_completion.py`(신규), `taste/views.py`(`_advance_progress`),
+  `taste/models.py`(`TasteProfileAxis.value` 검증 추가, 마이그레이션 `0002`),
+  `taste/photo_catalog_manifest.py`(무드보드1 라벨 추가).
+- **미확정**: 가중치 수치(0.4/0.4/0.2 등)는 임의로 정한 초기값이라, 실사용 데이터가 쌓이면
+  재조정 가능성 있음.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

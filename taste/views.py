@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -11,6 +12,7 @@ from .models import (
     SelectionPhoto,
     TasteProfileAxis,
 )
+from .onboarding_completion import compute_and_save_taste_profile
 from .serializers import (
     BasicQuestionResponseSerializer,
     SelectionPhotoSerializer,
@@ -88,6 +90,8 @@ def _advance_progress(progress):
         if progress.current_round == 2:
             progress.current_stage = OnboardingStage.COMPLETED
             progress.current_round = 1
+            progress.completed_at = timezone.now()
+            compute_and_save_taste_profile(progress.user)
         else:
             progress.current_round += 1
     progress.save()

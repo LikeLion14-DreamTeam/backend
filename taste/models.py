@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
@@ -43,7 +44,7 @@ class TasteProfileAxis(models.Model):
         related_name="taste_axes",
     )
     axis_code = models.CharField(max_length=50, choices=AxisCode.choices)
-    value = models.IntegerField()
+    value = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(100)])
     status = models.CharField(
         max_length=20, choices=AxisStatus.choices, default=AxisStatus.PENDING
     )

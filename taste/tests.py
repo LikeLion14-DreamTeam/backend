@@ -1,9 +1,11 @@
 from pathlib import Path
 
-from django.test import SimpleTestCase
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase
 
 from .axis_mapping import BASIC_QUESTION_AXIS_MAPPING
-from .models import AxisCode
+from .models import AxisCode, BasicQuestionResponse, SelectionPhoto, TasteProfile, TasteProfileAxis
+from .onboarding_completion import compute_and_save_taste_profile
 from .photo_catalog_manifest import PHOTO_CATALOG_MANIFEST
 from .photo_measurements import PHOTO_MEASUREMENTS
 
@@ -125,3 +127,66 @@ class PhotoMeasurementsTests(SimpleTestCase):
 
             with self.subTest(round_no=round_no, axis_code=axis_code):
                 self.assertGreater(sum(high_values) / len(high_values), sum(low_values) / len(low_values))
+
+
+class OnboardingCompletionTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create(username="onboarding_completion_test_user")
+
+    def _answer_basic_questions(self, pick_high):
+        for round_no, entry in BASIC_QUESTION_AXIS_MAPPING.items():
+            choices = entry["choices"]
+            answer = max(choices, key=choices.get) if pick_high else min(choices, key=choices.get)
+            BasicQuestionResponse.objects.create(user=self.user, round_no=round_no, answer=answer)
+
+    def _answer_ab_rounds(self, pick_high):
+        for round_no in range(1, 6):
+            for photo_set in PHOTO_CATALOG_MANIFEST[round_no]["sets"]:
+                for photo in photo_set["photos"]:
+                    is_selected = (photo["value"] == 80) == pick_high
+                    SelectionPhoto.objects.create(
+                        user=self.user, round_no=round_no, photo_id=photo["photo_id"], status=is_selected
+                    )
+
+    def _answer_moodboard(self, distance):
+        mb1_photos = PHOTO_CATALOG_MANIFEST[6]["sets"][0]["photos"]
+        chosen = {p["photo_id"] for p in mb1_photos if p["distance"] == distance}
+        for photo in mb1_photos:
+            SelectionPhoto.objects.create(
+                user=self.user, round_no=6, photo_id=photo["photo_id"], status=photo["photo_id"] in chosen
+            )
+
+        mb2_photos = PHOTO_CATALOG_MANIFEST[7]["sets"][0]["photos"]
+        for i, photo in enumerate(mb2_photos):
+            SelectionPhoto.objects.create(
+                user=self.user, round_no=7, photo_id=photo["photo_id"], status=(i < 3)
+            )
+
+    def test_high_answers_produce_high_axis_values(self):
+        self._answer_basic_questions(pick_high=True)
+        self._answer_ab_rounds(pick_high=True)
+        self._answer_moodboard(distance="가까이")
+
+        compute_and_save_taste_profile(self.user)
+
+        axes = {a.axis_code: a.value for a in TasteProfileAxis.objects.filter(user=self.user)}
+        self.assertEqual(set(axes.keys()), set(AxisCode.values))
+        for axis_code, value in axes.items():
+            with self.subTest(axis_code=axis_code):
+                self.assertGreater(value, 50)
+
+        profile = TasteProfile.objects.get(user=self.user)
+        self.assertIn("가까이", profile.taste)
+        self.assertIn("정면", profile.taste)
+
+    def test_low_answers_produce_low_axis_values(self):
+        self._answer_basic_questions(pick_high=False)
+        self._answer_ab_rounds(pick_high=False)
+        self._answer_moodboard(distance="멀리")
+
+        compute_and_save_taste_profile(self.user)
+
+        axes = {a.axis_code: a.value for a in TasteProfileAxis.objects.filter(user=self.user)}
+        for axis_code, value in axes.items():
+            with self.subTest(axis_code=axis_code):
+                self.assertLess(value, 50)
