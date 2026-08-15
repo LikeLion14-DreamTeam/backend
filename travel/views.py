@@ -15,6 +15,7 @@ from accounts.authentication import JWTAccessAuthentication
 from photobooks.models import Photobook
 from photobooks.services import build_photobook_pins, recompute_photo_layout_for_pin
 from products.models import NfcTag
+from recommendations.travel_adapter import rank_pin_photos
 from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
 
 from .country_codes import resolve_country_code
@@ -684,6 +685,10 @@ def _pin_photos_register(request, pin):
     """
     pin_id = pin.pin_id
     is_finished_trip_pin = pin.segment_id is not None and pin.included_in_segment
+    # 5.2.1 최초 추천은 이 핀에 한 번도 스코어링된 적 없을 때만 실행한다(taste_rank가 채워진
+    # 사진이 하나도 없으면 "아직 최초 스코어링 전"으로 간주). 이미 스코어링된 핀에 사진이
+    # 나중에 더 등록되는 경우엔 자동 재계산하지 않는다 — 5.6(새로고침)에서만 갱신.
+    already_scored = Photo.objects.filter(pin=pin, taste_rank__isnull=False).exists()
 
     serializer = PhotoRegisterRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -721,6 +726,11 @@ def _pin_photos_register(request, pin):
             photo_url=request.build_absolute_uri(relative_url),
         )
         added.append({"photo_id": photo.photo_id, "file_id": file_id})
+
+    if added and not already_scored:
+        # 5.2.1 최초 추천 — 이 핀이 처음 스코어링되는 시점. 온보딩 미완료(취향 축 없음)
+        # 유저는 rank_pin_photos 내부에서 이미 no-op 처리된다.
+        rank_pin_photos(pin)
 
     if added and is_finished_trip_pin:
         # 종료된 여정(포토북 이미 생성됨)의 핀에 사진이 새로 추가된 경우 — 그 핀의 포토북
