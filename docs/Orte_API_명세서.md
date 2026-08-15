@@ -190,8 +190,7 @@ Response
         { "axis_code": "vividness", "value": 40, "status": "REFLECTED" },
         { "axis_code": "tone", "value": 55, "status": "REFLECTED" },
         { "axis_code": "density", "value": 30, "status": "REFLECTED" },
-        { "axis_code": "framing", "value": 70, "status": "REFLECTED" },
-        { "axis_code": "angle", "value": 45, "status": "REFLECTED" }
+        { "axis_code": "photo_type", "value": 70, "status": "REFLECTED" }
     ]
 }
 ```

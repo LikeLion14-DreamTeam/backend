@@ -1,7 +1,7 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from rest_framework import serializers
 
-from .models import BasicQuestionResponse, SelectionPhoto
+from .models import BasicQuestionResponse, SelectionPhoto, TasteProfileAxis
 
 
 class BasicQuestionResponseSerializer(serializers.ModelSerializer):
@@ -26,3 +26,10 @@ class SelectionPhotoSerializer(serializers.ModelSerializer):
         model = SelectionPhoto
         fields = ["photo_id", "user_id", "round_no", "status", "selected_at"]
         read_only_fields = ["user_id", "selected_at"]
+
+
+class TasteProfileAxisSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TasteProfileAxis
+        fields = ["axis_code", "value", "status"]
+        read_only_fields = fields

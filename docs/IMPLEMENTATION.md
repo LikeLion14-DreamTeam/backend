@@ -186,6 +186,23 @@
 - **미확정**: 온보딩 완료(`COMPLETED`) 시점에 실제 `TasteProfileAxis` 값을 계산해 반영하는 로직은
   별도 이슈로 분리 예정.
 
+### 2026-08-15 — 취향 축 목록 조회 API 구현 (#33)
+- **결정**: `GET /users/me/taste-profile/axes` (API 명세서 2.4)를 구현. `TasteProfileAxis`를
+  `axis_code`, `value`, `status` 3개 필드만 노출하는 read-only 시리얼라이저로 응답. 정렬은
+  `AxisCode` 정의 순서(brightness→vividness→tone→density→photo_type) 고정. 아직 온보딩을
+  완료하지 않아 해당 유저의 축 row가 하나도 없으면 `axes: []` 빈 배열을 반환(별도 404 처리 없음).
+  GET이라 body가 없어서, `auth_temp.get_current_user`가 `request.data`뿐 아니라
+  `request.query_params`에서도 `user_id`를 읽도록 확장(`?user_id=` 쿼리 파라미터 방식).
+- **이유**: 응답 예시 축이 API 명세서상 일시적으로 6개(framing/angle 포함)로 잘못 채워져 있던 걸
+  사용자 확인 후 5개(photo_type 포함)로 재정정(위 2026-08-14 결정과 동일 기준 재확인). 빈 배열
+  응답은 스펙에 명시가 없어 가장 단순한 기본값으로 채택 — 온보딩 미완료 유저의 접근을 막을지는
+  스펙 미확정이라 이번 범위에서 별도 차단 로직은 넣지 않음.
+- **영향 범위**: `taste/auth_temp.py`(`get_current_user` 쿼리 파라미터 지원 추가),
+  `taste/serializers.py`(`TasteProfileAxisSerializer` 추가), `taste/views.py`
+  (`list_taste_profile_axes`), `taste/urls.py`, `docs/Orte_API_명세서.md` 2.4 예시 축 개수 수정(6→5).
+- **미확정**: 온보딩 미완료 유저가 이 API를 호출했을 때 빈 배열 대신 별도 에러를 줘야 하는지는
+  프론트 쪽 UX 결정에 따라 나중에 바뀔 수 있음.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
