@@ -24,7 +24,11 @@
 | ERD의 FK 제약 누락 | SQL export엔 3개 FK만 존재 (TASTE_PROFILE_AXIS, COUNTRY_STAMP, TASTE_PROFILE → USER) | 다이어그램에 그려진 관계선은 전부 유효한 관계로 간주하고 Django `models.ForeignKey`로 구현. SQL 파일 자체는 최종 DDL이 아닌 설계 스냅샷으로 취급 | ✅ 반영 완료 |
 | 무드보드 1라운드 캐릭터 소재 | 원문에 언급 없음 (사진 페어/무드보드 소재 미지정) | 브랜드 톤 유지한 3D 마스코트 캐릭터(사자 또는 사람)로 확정, 프롬프트 별도 문서 관리 | ✅ 반영 완료 (구현과 무관, 에셋 결정) |
 | 마이페이지 슬라이더 축 개수 (재정정) | (구) 위 행에서 "6개 유지"로 정리했었음 | **5개로 정정.** 기본질문 5개·A/B 5쌍이 1:1로 검증하는 축(밝기·채도·색온도·구도와 밀도·사진종류)만 슬라이더/축으로 사용. 별도 distance·angle 축은 만들지 않음 — taste 앱 모델 설계(#26) 중 확정 | ✅ 반영 완료 (2026-08-14) |
-| 무드보드 2라운드 결과의 축 반영 방식 | 원문에 구체적 반영 방식 없음 | 무드보드 1라운드(캐릭터 각도·거리 9장 중 3장, 구도 선호)와 2라운드(여행사진 9장 중 3장, 선택 사진 분석)는 **모두 `density`(구도와 밀도) 축을 포함한 5개 축에 대한 추가 신호**로 반영. 별도 축을 새로 만들지 않고 기존 5축 체계에 신호만 더하는 구조 | ✅ 반영 완료 (2026-08-14) |
+| 무드보드 2라운드 결과의 축 반영 방식 | 원문에 구체적 반영 방식 없음 | 무드보드 1라운드(캐릭터 각도·거리 9장 중 3장)는 **`density`(구도와 밀도) 축에만** 신호 반영. 무드보드 2라운드(인물·풍경 섞인 다양한 사진 9장 중 3장)는 선택된 3장을 A/B와 동일한 측정 함수로 분석해 **5개 축 전부**에 신호 반영. 별도 축은 만들지 않음 | ✅ 반영 완료 (2026-08-14, 2026-08-15 라운드별 반영 범위 재확정) |
+| TRAVEL_SEGMENT.dates_manually_set 추가 | 원문에 없음 | 4.3(여행 구간 편집)에서 날짜를 사용자가 직접 선택할 수 있게 되면서, "직접 정한 적 있는지"를 서버가 기억해 핀 토글로 인한 자동 재계산이 직접 설정한 날짜를 덮어쓰지 않게 하는 플래그 컬럼 추가 (travel 담당자 전달, ERD 원본에도 반영됨) | ✅ 반영 완료 (2026-08-15, travel 앱 소관 — taste/recommendations 직접 영향 없음, 참고용) |
+| 무드보드 1라운드 "방향" 신호 반영처 (최종) | 원문에 없음 | 거리(distance)는 계속 `density` 축으로, **방향(direction)은 축이 아니라 `TasteProfile.taste` 자유 텍스트 생성 요소로 반영** — 슬라이더 노출·조작 불가, 추천 스코어링에만 내부 사용. 축은 계속 5개 유지 (오늘 여러 번 재검토된 사안의 최종 결론) | ✅ 반영 완료 (2026-08-15, `docs/IMPLEMENTATION.md` 결정 로그 참고) |
+| PHOTO.is_pin_cover 타입 변경 | BOOLEAN(대표사진 여부만 표시) | **INT로 변경, 대표사진 순위(1/2/3) 저장** — 추천이 단순 플래그가 아니라 순위를 매겨서 제공하는 것으로 확정됨에 따라 travel 담당자가 변경. recommendations 스코어링 함수 출력도 boolean이 아니라 순위(rank)를 반환하도록 설계해야 함 | ✅ 반영 완료 (2026-08-15, travel 담당자 확정 전달) |
+| 취향 축 슬라이더 직접 조작 가능 여부 | (구) 기능명세서: "슬라이더 직접 조작 불가, 값 변경은 재학습·추천 수정으로만 발생" | **API 명세서 2.5가 "축 하나의 값을 마이페이지 슬라이더로 직접 조정"을 명시 — 직접 조작 가능이 최종.** taste #57에서 이렇게 구현 완료. spec.md 3장 "7.2 요약" 문단도 함께 정정 | ✅ 반영 완료 (2026-08-15, taste 최종 점검 중 발견) |
 
 > 검토 필요 항목이 새로 발견되면 이 표에 먼저 추가하고, 결정되면 상태를 ✅로 바꾸면서
 > `docs/IMPLEMENTATION.md`에도 같은 내용을 결정 로그로 남깁니다.
@@ -104,6 +108,7 @@
 | end_at | DATETIME | |
 | status | BOOLEAN | |
 | cover_photo_url | VARCHAR(500) | |
+| dates_manually_set | BOOLEAN (기본 false) | 4.3에서 사용자가 날짜를 직접 선택했는지 여부. true면 핀 토글로 자동 재계산 시 날짜를 덮어쓰지 않음 (2026-08-15 추가) |
 
 ### PIN
 | 필드 | 타입 | 비고 |
@@ -131,7 +136,7 @@
 | longitude | DECIMAL(10,6) | |
 | source_type | VARCHAR(30) | 촬영/업로드 |
 | photo_url | VARCHAR(500) | |
-| is_main | BOOLEAN | |
+| is_pin_cover | INT (nullable) | 대표사진 순위(1/2/3), 대표사진 아니면 NULL. 기존 BOOLEAN에서 변경(2026-08-15) |
 
 ### VOICE_MEMO
 | 필드 | 타입 | 비고 |
@@ -156,14 +161,18 @@
 |---|---|---|
 | accounts | 계정·인증 | User, Session |
 | taste | 취향 프로파일 온보딩 | TasteProfile, TasteProfileAxis, OnboardingProgress, BasicQuestionResponse, SelectionPhoto, ProfileRetrainHistory |
-| recommendations | 추천 | RecommendationResult, RecommendationEdit, RecommendationRegenHistory |
+| recommendations | 추천 | (모델·URL 없음 — 스코어링 함수만, 아래 참고) |
 | products | NFC 제품 | NfcTag |
 | travel | 여행 기록 핵심 | TravelSegment, Pin, TaggingSession, Photo, VoiceMemo, CountryStamp |
 | photobooks | 포토북 | Photobook, PhotobookPin, PhotobookPhotoLayout |
 
-> 참고: `OnboardingProgress`, `ProfileRetrainHistory`, `RecommendationResult`, `RecommendationEdit`,
-> `RecommendationRegenHistory`는 ERD 다이어그램에는 아직 반영되지 않았고 기능명세서 데이터 항목 기준으로
-> taste/recommendations 앱에서 신규 설계가 필요함. 설계 확정 시 `docs/IMPLEMENTATION.md`에 필드 정의를 남길 것.
+> 참고: `OnboardingProgress`, `ProfileRetrainHistory`는 ERD 다이어그램에는 아직 반영되지 않았고
+> 기능명세서 데이터 항목 기준으로 taste 앱에서 신규 설계가 필요함. 설계 확정 시
+> `docs/IMPLEMENTATION.md`에 필드 정의를 남길 것.
+> `RecommendationResult`/`RecommendationEdit`/`RecommendationRegenHistory`는 만들지 않음 —
+> API 명세서 부록 B의 `PHOTO.is_pin_cover` 플래그 단순화 확정에 따라 불필요. 추천 관련
+> 엔드포인트(5.4~5.7)도 전부 travel 앱 `Pin`/`Photo` API 안에 있어 recommendations 앱은
+> URL도 없이 travel이 호출하는 스코어링 함수만 제공함 (2026-08-15 결정, `docs/IMPLEMENTATION.md` 참고).
 > (`ABSelectionLog`는 검토 후 제외 확정 — `SelectionPhoto`가 A/B+무드보드 선택을 통합 관리. 2026-08-14,
 > `docs/IMPLEMENTATION.md` 결정 로그 참고)
 
@@ -182,12 +191,14 @@
 | 4 | density | CLIP + 인물크기(OpenCV) 병합 |
 | 5 | 사진종류 | OpenCV 사람 감지 |
 
-- 무드보드 2라운드:
-  - 1라운드: 거리(클로즈업/중경/광각) × 방향(정면/측면/뒷모습) 3×3=9장 중 3장 선택. distance·angle 축 계측.
-    angle 측정은 OpenAI Vision API 신규 구현(`analyze_direction`) 필요.
-  - 2라운드: 여러 축이 동시에 섞인 조합 사진 9장 중 3장 선택 (조합 선호 파악용).
-- 마이페이지(7.2) 슬라이더 축: 6개 확정 (밝은↔어두운, 선명한↔차분한, 웜↔쿨, 여백 많은↔꽉 찬, 클로즈업↔넓게, 정면↔뒷모습·옆모습)
-  → 5문항(기본질문+A/B) + 무드보드 1라운드(distance, angle)가 합쳐져 6축을 채움.
+- 무드보드 2라운드 (2026-08-15 재확정 — 아래 "마이페이지 슬라이더 축 개수 (재정정)"/"무드보드 2라운드 결과의
+  축 반영 방식" 체크리스트 행 기준, 별도 distance·angle 축 없음):
+  - 1라운드: 거리(클로즈업/중경/광각) × 방향(정면/측면/뒷모습) 3×3=9장 중 3장 선택. **`density` 축에만** 신호 반영
+    (별도 distance·angle 축·OpenAI Vision API 불필요).
+  - 2라운드: 인물·풍경 등 여러 요소가 섞인 조합 사진 9장 중 3장 선택. 선택된 3장을 A/B와 동일한 측정 함수
+    (HSV 명도/채도, R-B 채널차, CLIP+인물크기, 사람 감지)로 분석해 **5개 축 전부**에 신호 반영.
+- 마이페이지(7.2) 슬라이더 축: **5개** (밝은↔어두운, 선명한↔차분한, 웜↔쿨, 여백 많은↔꽉 찬, 인물↔풍경)
+  → 기본질문 5문항 + A/B 5쌍 + 무드보드 1·2라운드 신호가 전부 이 5축에 합류.
 - 온보딩 마지막 자유 텍스트 프롬프트 입력: **스코프 아웃 확정** (원칙 충돌, 데이터 구조 불일치로 보류).
 
 ### 재학습 vs 재추천 로직 (2026.08 확정)
@@ -246,15 +257,21 @@
 - 요청 시점의 취향 프로파일로 핀에 등록된 전체 사진을 스코어링, 상위 10장을 후보로 추림.
 - 10장 미만이면 등록된 사진 전체를 후보로 사용. 후보가 정확히 3장이면 무작위 선정 없이 그대로 사용.
 - 후보 중 3장을 무작위 선정해 추천 결과 교체, 직전 추천 포함 사진도 후보에 남아 다시 선정될 수 있음.
-- 추천 버전을 1 증가시켜 저장. 이전 추천 결과는 보존하지 않고 최신으로 교체.
+- ~~추천 버전을 1 증가시켜 저장.~~ **[정정]** 버전 관리는 하지 않는다 — API 명세서 5.6·부록 B가
+  `PHOTO.is_main`(대표사진 순위) 플래그 갱신만으로 단순화했고 버전 필드 자체가 없음
+  (2026-08-15 확인, recommendations 스코어링 설계 중 발견). 이전 추천 결과는 보존하지 않고
+  최신으로 교체하는 것만 유효.
 - 재추천 요청과 결과는 취향 프로파일 학습에 반영하지 않음 — `TASTE_PROFILE_AXIS` 불변.
 - 프로파일이 재학습/수정 신호로 바뀌어도 기존 추천은 소급 재계산하지 않으며, 재추천을 요청한 핀에만 새 프로파일 적용.
 - 재추천 횟수 제한 없음.
 
 ### 7.2 취향 프로파일 시각화 (요약)
 
-- 마이페이지에서 6개 축을 양극 슬라이더로 표시 (읽기 전용).
-- 값 변경은 7.3 재학습과 5.2.2 추천 수정을 통해서만 발생. 슬라이더 직접 조작 불가.
+- 마이페이지에서 5개 축을 양극 슬라이더로 표시 (2.4 재사용).
+- 값 변경은 **슬라이더 직접 조작(2.5)**, 7.3 재학습, 5.2.2 추천 수정 세 경로로 발생 —
+  기능명세서 원문엔 "슬라이더 직접 조작 불가"로 돼 있었으나, 최종 API 명세서 2.5가
+  "축 하나의 값을 마이페이지 슬라이더로 직접 조정"을 명시하고 있어 **API 명세서 기준으로
+  정정**(2026-08-15, taste #57 구현 중 확인).
 - 점수·등급 형태 수치는 노출하지 않음.
 
 ### 7.3 취향 재학습 (요약)

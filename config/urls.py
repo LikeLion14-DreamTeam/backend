@@ -29,4 +29,5 @@ urlpatterns = [
     path('', include('travel.urls')),
     path('', include('photobooks.urls')),
     path('', include('uploads.urls')),
+    path('', include('taste.urls')),
 ]

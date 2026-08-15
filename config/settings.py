@@ -146,6 +146,7 @@ PROJECT_APPS = [
     'uploads',
     'travel',
     'photobooks',
+    'recommendations',
 ]
 
 THIRD_PARTY_APPS = [
