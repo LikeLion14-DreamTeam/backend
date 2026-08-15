@@ -21,15 +21,27 @@ travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드
    점수로 쓴다(차이가 작을수록 = 취향에 가까울수록 높은 점수).
 3. 최초 추천(`select_initial_recommendations`, 5.2.1) — 유사 사진 축소 → 스코어링 → 상위
    3장(3장 미만이면 있는 대로).
-4. 재추천(`select_refreshed_recommendations`, 5.2.3) — 유사 사진 축소 없이 전체 스코어링 →
-   상위 10장 후보(10장 미만이면 전체, 정확히 3장이면 무작위 없이 그대로) → 그중 3장 무작위 선정.
+4. 재추천(`select_refreshed_recommendations`, 5.2.3) — **5.2.1과 동일하게 유사 사진 축소를
+   먼저 적용**(2026-08-15 결정: 스펙 원문엔 명시가 없지만, 축소 없이 무작위 3장을 뽑으면 비슷한
+   사진끼리 나란히 뽑힐 수 있어 추천 품질이 떨어짐). 대표 사진들만 점수순으로 상위 10장 후보
+   (10장 미만이면 전체, 정확히 3장이면 무작위 없이 그대로) → 그중 3장 무작위 선정.
+5. 전체 순위(`rank_all_photos`/`rank_all_photos_for_refresh`, `travel.Photo.taste_rank`용) —
+   핀의 사진 전체에 순위(1부터)를 매긴다. 유사 사진 그룹에서는 **대표 1장만 상위 순위 경쟁에
+   참여**시키고(대표들끼리 점수 비교/무작위 선정으로 순위 결정 — 유사 사진 여러 장이 나란히
+   최상위를 차지해 대표사진들이 사실상 같은 사진이 되는 문제를 막기 위함, 2026-08-15 확인),
+   그룹에서 제외된 "중복" 사진들은 각자 개별 점수로 다시 정렬해 대표 사진들 뒤에 순위를
+   이어붙인다. 그래서 상위 순위는 항상 서로 다른 사진이고, 그래도 핀의 모든 사진이 순위를 받는다.
+
+## 언제 호출하는지 (travel과 확인된 사항, 2026-08-15)
+- **핀 생성 시점**: 그때 있는 사진 전체를 스코어링(최초 추천).
+- **5.5(사진 등록)로 나중에 수동 추가된 사진**: 자동으로 재스코어링하지 않는다 — 5.6(새로고침)을
+  사용자가 직접 눌러야 새로 추가된 사진까지 포함해서 재계산된다. `travel/models.py`의
+  `Photo.taste_rank` 주석("수동 새로고침에서만 갱신")과 일치.
 
 ## 출력 형식 (확정)
-`select_initial_recommendations`/`select_refreshed_recommendations`는 **점수 높은 순으로 정렬된
-`photo_id` 리스트**를 반환한다. 리스트의 순서 자체가 순위다 — 별도로 순위 숫자를 담은 튜플을
-반환하지 않는다. `PHOTO.is_main`이 순위(INT)를 저장하는 형태라면, 호출부(travel)에서
-`for rank, photo_id in enumerate(result, start=1): ...`로 순위를 매기면 된다. 이 편이 스코어링
-함수를 travel의 특정 필드 타입에 묶지 않아 더 안정적이다.
+`select_initial_recommendations`/`select_refreshed_recommendations`는 점수 높은 순으로 정렬된
+`photo_id` 리스트를, `rank_all_photos`/`rank_all_photos_for_refresh`는 `[(photo_id, rank), ...]`를
+반환한다(순위는 `Photo.taste_rank`에 그대로 저장하면 됨).
 
 ## 아직 미정 (travel 연동 시 확정 필요)
 - `TIME_PROXIMITY_SECONDS`/`SIMILARITY_THRESHOLD` 구체적인 수치 — 지금은 임의로 잡은 초기값,
@@ -96,17 +108,63 @@ def select_initial_recommendations(photos, taste_axes):
     return [photo_id for photo_id, _image, _captured_at in scored[:INITIAL_RECOMMENDATION_COUNT]]
 
 
-def select_refreshed_recommendations(photos, taste_axes, rng=None):
-    """5.2.3 재추천. 유사 사진 축소는 하지 않는다 — 핀의 전체 사진을 스코어링해 상위 10장을
-    후보로 추리고, 그중 3장을 무작위 선정한다(후보가 정확히 3장이면 무작위 없이 그대로)."""
+def rank_all_photos(photos, taste_axes):
+    """핀의 사진 전체에 순위(1부터)를 매겨 [(photo_id, rank), ...]를 반환한다
+    (`travel.Photo.taste_rank`용). 유사 사진 그룹은 대표 1장만 상위 순위 경쟁에 참여시키고,
+    나머지 "중복" 사진은 개별 점수로 재정렬해 뒤에 이어붙인다 — 그래야 유사 사진 여러 장이
+    나란히 최상위를 차지해 대표사진 3장이 사실상 같은 사진이 되는 문제가 생기지 않는다."""
+    if not photos:
+        return []
+
+    primary = reduce_similar_photos(photos)
+    primary_ids = {photo_id for photo_id, _image, _captured_at in primary}
+    duplicates = [p for p in photos if p[0] not in primary_ids]
+
+    ranked_primary = sorted(primary, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+    ranked_duplicates = sorted(duplicates, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+
+    ordered = ranked_primary + ranked_duplicates
+    return [(photo_id, rank) for rank, (photo_id, _image, _captured_at) in enumerate(ordered, start=1)]
+
+
+def _rank_for_refresh(photos, taste_axes, rng=None):
+    """5.2.3 재추천의 공통 순서 계산. 유사 사진 그룹은 대표 1장만 상위 10장 후보 풀에
+    넣어(무작위 3장이 비슷한 사진끼리 몰리지 않도록) 그중 3장을 무작위 선정해 맨 앞에 두고,
+    선정 안 된 대표 사진 → 중복 사진 순으로 이어붙인 전체 (photo_id, image, captured_at)
+    리스트를 반환한다."""
     rng = rng or random
 
-    scored = sorted(photos, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
-    candidate_pool = scored[:REFRESH_CANDIDATE_POOL_SIZE]
+    primary = reduce_similar_photos(photos)
+    primary_ids = {photo_id for photo_id, _image, _captured_at in primary}
+    duplicates = [p for p in photos if p[0] not in primary_ids]
+
+    scored_primary = sorted(primary, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+    candidate_pool = scored_primary[:REFRESH_CANDIDATE_POOL_SIZE]
 
     if len(candidate_pool) <= REFRESH_RECOMMENDATION_COUNT:
         selected = candidate_pool
     else:
         selected = rng.sample(candidate_pool, REFRESH_RECOMMENDATION_COUNT)
 
-    return [photo_id for photo_id, _image, _captured_at in selected]
+    selected_ids = {photo_id for photo_id, _image, _captured_at in selected}
+    selected_sorted = sorted(selected, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+    remaining_primary = [p for p in scored_primary if p[0] not in selected_ids]
+    scored_duplicates = sorted(duplicates, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+
+    return selected_sorted + remaining_primary + scored_duplicates
+
+
+def select_refreshed_recommendations(photos, taste_axes, rng=None):
+    """5.2.3 재추천. 유사 사진 축소 후 상위 10장 후보 중 3장을 무작위 선정해 photo_id로 반환한다
+    (후보가 정확히 3장이면 무작위 없이 그대로)."""
+    ordered = _rank_for_refresh(photos, taste_axes, rng)
+    return [photo_id for photo_id, _image, _captured_at in ordered[:REFRESH_RECOMMENDATION_COUNT]]
+
+
+def rank_all_photos_for_refresh(photos, taste_axes, rng=None):
+    """5.2.3 재추천 + 핀 전체 순위. 무작위 선정된 3장이 1~3등, 나머지 대표 사진과 중복 사진이
+    그 뒤로 점수순 이어붙어 [(photo_id, rank), ...]를 반환한다(`travel.Photo.taste_rank`용)."""
+    if not photos:
+        return []
+    ordered = _rank_for_refresh(photos, taste_axes, rng)
+    return [(photo_id, rank) for rank, (photo_id, _image, _captured_at) in enumerate(ordered, start=1)]
