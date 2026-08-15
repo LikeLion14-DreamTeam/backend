@@ -96,6 +96,22 @@ def load_image(path):
     return image
 
 
+def get_image_embedding(image):
+    """CLIP 이미지 임베딩(정규화됨) — recommendations 앱의 유사 사진 판별에 재사용된다."""
+    model, preprocess, _tokenizer = _get_clip()
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    from PIL import Image as PILImage
+
+    pil_image = PILImage.fromarray(rgb)
+
+    with torch.no_grad():
+        image_input = preprocess(pil_image).unsqueeze(0)
+        image_features = model.encode_image(image_input)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+    return image_features.squeeze(0).numpy()
+
+
 def measure_brightness(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     v_mean = hsv[:, :, 2].mean()
