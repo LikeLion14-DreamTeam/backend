@@ -128,7 +128,7 @@ class ProfileRetrainHistory(models.Model):
         related_name="profile_retrain_history",
     )
     started_at = models.DateTimeField()
-    completed_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"ProfileRetrainHistory(user={self.user_id}, completed_at={self.completed_at})"
