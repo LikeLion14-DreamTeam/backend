@@ -46,3 +46,10 @@ class TripPatchRequestSerializer(serializers.Serializer):
         if start_at and end_at and start_at > end_at:
             raise serializers.ValidationError("start_at은 end_at보다 늦을 수 없습니다.")
         return attrs
+
+class PinUpdateRequestSerializer(serializers.Serializer):
+    """PATCH /pins/{pinId} 요청 body 검증 (5.2)
+    place_name/text_note만 수정 가능"""
+
+    place_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    text_note = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=500)
