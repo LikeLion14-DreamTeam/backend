@@ -1457,6 +1457,21 @@
 - **미확정**: 없음 — 배포·양방향 테스트(axes/embedding) 모두 통과. 다음 단계는 배포
   서버(`secrets.json`)에서 `CLIP_BACKEND=lambda`로 전환하는 것뿐(타이밍은 운영진 판단).
 
+### 2026-08-16 — photobooks TODO 해결: 핀 카드 사진도 taste_rank 순 정렬
+- **결정**: `photobooks/services.py:_select_photos_for_pin`을 `captured_at` 순에서
+  `Photo.taste_rank` 순(NULL은 뒤로, 그 안에서 `captured_at` fallback)으로 교체. 새로 스코어링하지
+  않고 이미 계산된 `taste_rank` 값을 그대로 재사용 — recommendations 앱 호출 없음, CLIP 연산
+  추가 없음.
+- **이유**: `travel/models.py`의 `taste_rank` 필드 주석("포토북에서 쓰는 핀별 대표사진 선정은
+  이 필드가 아니라 `PhotobookPhotoLayout`로 별도 관리한다")이 "저장 위치가 다르다"는 뜻인지
+  "선정 로직 자체가 taste_rank를 참고하면 안 된다"는 뜻인지 처음엔 불명확해 보류했으나, 사용자
+  판단으로 재사용하는 쪽으로 확정 — `PhotobookPhotoLayout`은 여전히 포토북 전용 저장소로 유지되고,
+  거기 들어갈 사진을 고르는 기준만 바뀐 것이라 필드 주석과 상충하지 않는다고 결론.
+- **영향 범위**: `photobooks/services.py`(`_select_photos_for_pin`), `photobooks/tests.py`
+  (`SelectPhotosForPinTasteRankOrderingTests` 추가). 부수적으로 `taste/photo_measurement.py`
+  docstring 정정("CLIP은 CI 전용"이라는 문구가 recommendations 실연동 이후 틀린 설명이 됨),
+  `docs/spec.md`의 "재추천 후보 10장 미만 미확정" 문단이 위쪽 체크리스트와 모순되던 것도 함께 정정.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

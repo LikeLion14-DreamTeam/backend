@@ -8,6 +8,7 @@ from accounts.models import User
 from travel.models import Photo, Pin, TravelSegment
 
 from .models import Photobook, PhotobookPhotoLayout, PhotobookPin
+from .services import build_photobook_pins
 from .views import photobook_cover_refresh
 
 
@@ -79,3 +80,32 @@ class PhotobookCoverRefreshTests(TestCase):
         response = self._refresh(user=other_user)
 
         self.assertEqual(response.status_code, 404)
+
+
+class SelectPhotosForPinTasteRankOrderingTests(TestCase):
+    """포토북 핀 카드 사진 선정이 taste_rank 순으로 되는지 검증 (photobooks TODO 해결)."""
+
+    def test_photos_ordered_by_taste_rank_with_nulls_last(self):
+        user = _make_user()
+        segment = TravelSegment.objects.create(user=user, name="테스트 여행", status=True)
+        photobook = Photobook.objects.create(segment=segment, name="테스트 여행")
+        base_time = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        pin = Pin.objects.create(
+            user=user, segment=segment, included_in_segment=True, city="도쿄", tagged_at=base_time
+        )
+
+        photo_rank3 = Photo.objects.create(
+            pin=pin, captured_at=base_time, photo_url="rank3", taste_rank=3
+        )
+        photo_rank1 = Photo.objects.create(
+            pin=pin, captured_at=base_time + datetime.timedelta(hours=1), photo_url="rank1", taste_rank=1
+        )
+        photo_no_rank = Photo.objects.create(
+            pin=pin, captured_at=base_time + datetime.timedelta(hours=2), photo_url="no_rank", taste_rank=None
+        )
+
+        build_photobook_pins(photobook)
+
+        layouts = PhotobookPhotoLayout.objects.filter(photobook_pin__photobook=photobook).order_by("order")
+        ordered_urls = [layout.photo.photo_url for layout in layouts]
+        self.assertEqual(ordered_urls, ["rank1", "rank3", "no_rank"])

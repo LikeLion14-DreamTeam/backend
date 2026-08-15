@@ -6,12 +6,14 @@ taste 온보딩 고정 카탈로그(66장)는 이 모듈을 직접 호출하지 
 `taste/photo_measurements.py`(정적 데이터)로 저장해두고, 배포 서버 런타임은 그 정적
 데이터만 읽는다.
 
-recommendations 앱(5.2.1 등, 유저가 매번 새로 올리는 사진 스코어링)은 사진이 고정돼 있지
-않아 이 모듈을 런타임에 실제로 호출해야 한다 — `recommendations/clip_backend.py`가 로컬
-개발/테스트 환경(`CLIP_BACKEND="local"`)에서 이 모듈을 그대로 불러 쓴다. 배포 환경
-(`CLIP_BACKEND="lambda"`)에서는 이 모듈을 안 쓰고 대신 `lambda_clip_service/photo_measurement.py`
-(이 파일의 사본, Lambda 컨테이너에 들어감)가 실행된다 — 2026-08-16 결정, 두 파일은 내용이
-동일해야 하니 로직을 고치면 양쪽 다 수정할 것(docs/IMPLEMENTATION.md 참고).
+recommendations 앱(#71~, 5.2.1 등 유저가 매번 새로 올리는 사진 스코어링)은 사진이 고정돼
+있지 않아 이 모듈을 런타임에 실제로 호출해야 한다 — 더 이상 "로컬/CI 사전계산 전용"이
+아니다. `recommendations/clip_backend.py`가 로컬 개발/테스트 환경(`CLIP_BACKEND="local"`)에서
+이 모듈을 그대로 불러 쓴다. 배포 환경(`CLIP_BACKEND="lambda"`)에서는 이 모듈을 안 쓰고 대신
+`lambda_clip_service/photo_measurement.py`(이 파일의 사본, Lambda 컨테이너에 들어감)가
+실행된다 — 2026-08-16 결정 및 실제 배포·검증 완료(`docs/IMPLEMENTATION.md`,
+`docs/TEMP_NOTES.md` 해당 항목 참고). 두 파일은 내용이 동일해야 하니 로직을 고치면 양쪽 다
+수정할 것.
 
 인물 감지 방식(얼굴 DNN + 전신/상반신 Haar cascade 조합)은 팀원이 2026-08-11 실제 여행
 사진 40장으로 CLIP 단독 vs 하이브리드를 비교 검증한 결과를 그대로 따른 것이다 — Haar cascade
