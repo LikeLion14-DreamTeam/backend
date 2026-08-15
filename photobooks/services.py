@@ -104,3 +104,20 @@ def recompute_photo_layout_for_pin(pin):
         return
     PhotobookPhotoLayout.objects.filter(photobook_pin=photobook_pin).delete()
     _write_photo_layout(photobook_pin, pin)
+
+
+def refresh_cover_photo(photobook):
+    """
+    포토북 커버 사진 새로고침 (6.4). 포토북에 이미 포함된 사진(PhotobookPhotoLayout) 중
+    순수 무작위로 1장을 뽑아 Photobook.cover_photo_url에 저장한다.
+
+    명세서 원문은 "취향 프로파일 기준 재정렬 → 상위 10개 → 무작위 1개"였지만, 새로고침마다
+    여정 전체 사진을 다시 스코어링하는 비용이 커서 취향 스코어링 없이 무작위로 단순화하기로
+    결정했다 — docs/spec.md 정정 기록 참고. 포토북에 사진이 하나도 없으면 아무 것도 하지 않는다.
+    """
+    layouts = list(PhotobookPhotoLayout.objects.filter(photobook_pin__photobook=photobook))
+    if not layouts:
+        return
+    chosen = random.choice(layouts)
+    photobook.cover_photo_url = chosen.photo.photo_url
+    photobook.save(update_fields=["cover_photo_url"])
