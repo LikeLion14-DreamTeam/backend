@@ -25,18 +25,22 @@ from .serializers import (
 
 request_logger = logging.getLogger("request_logger")
 
-GOOGLE_CLIENT_ID = get_secret("GOOGLE_CLIENT_ID")
+
+def _get_google_client_id() -> str:
+    """settings/secrets.json에서 GOOGLE_CLIENT_ID를 필요 시점에 로드합니다.
+    import 시점에 설정 누락으로 서버가 뜨지 않는 문제를 방지하기 위함입니다.
+    """
+    return get_secret("GOOGLE_CLIENT_ID")
 
 
 def issue_session_token(user: User) -> str:
-    """user_id claim이 들어간 JWT 세션 토큰 1개를 만듬
-    """
+    """user_id claim이 들어간 JWT 세션 토큰 1개를 만듭니다."""
     token = AccessToken.for_user(user)
     return str(token)
 
 
 @api_view(["POST"])
-@authentication_classes([]) 
+@authentication_classes([])
 @permission_classes([AllowAny])
 def google_login(request):
     """POST /auth/google (1.1)"""
@@ -46,7 +50,7 @@ def google_login(request):
 
     try:
         idinfo = google_id_token.verify_oauth2_token(
-            raw_id_token, google_requests.Request(), GOOGLE_CLIENT_ID
+            raw_id_token, google_requests.Request(), _get_google_client_id()
         )
     except ValueError as exc:
         return Response(

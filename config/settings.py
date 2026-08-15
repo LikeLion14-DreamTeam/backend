@@ -140,7 +140,9 @@ DJANGO_APPS = [
 ]
 
 PROJECT_APPS = [
+    'taste',
     'accounts',
+    'products',
 ]
 
 THIRD_PARTY_APPS = [
