@@ -597,6 +597,14 @@ def _trip_detail_patch(request, segment):
     with transaction.atomic():
         if data.get("name"):
             segment.name = data["name"]
+            # 포토북 이름과 여행 구간 이름을 하나로 동기화한다 — 2026-08-17 결정.
+            # 이전엔 독립적으로 관리했으나(6.3 참고), 사용자 혼란 방지를 위해 어느 쪽에서
+            # 바꾸든 나머지 한쪽도 같이 바뀌도록 통일했다. docs/IMPLEMENTATION.md 참고.
+            try:
+                segment.photobook.name = data["name"]
+                segment.photobook.save(update_fields=["name"])
+            except Photobook.DoesNotExist:
+                pass
 
         if dates_given:
             segment_pins = list(Pin.objects.filter(segment=segment))

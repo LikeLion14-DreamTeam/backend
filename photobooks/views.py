@@ -221,13 +221,20 @@ def photobook_cover_refresh(request, photobook_id):
 def _photobook_detail_patch(request, photobook):
     """
     PATCH /photobooks/{photobookId} (6.3)
-    name만 수정 가능(여행 구간 이름과 독립적으로 처리)
+    name 수정 — 여행 구간 이름과 하나로 동기화한다. (2026-08-17 결정: 이전엔 독립
+    관리였으나, 어느 쪽에서 이름을 바꾸든 나머지 한쪽도 같이 바뀌도록 통일했다.
+    docs/IMPLEMENTATION.md 참고.)
     """
     serializer = PhotobookUpdateRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    photobook.name = serializer.validated_data["name"]
+    name = serializer.validated_data["name"]
+
+    photobook.name = name
     photobook.save(update_fields=["name"])
 
-    request_logger.info("PATCH /photobooks/%s name 변경", photobook.photobook_id)
+    photobook.segment.name = name
+    photobook.segment.save(update_fields=["name"])
+
+    request_logger.info("PATCH /photobooks/%s name 변경(여행 구간 이름도 동기화)", photobook.photobook_id)
 
     return Response({"photobook_id": photobook.photobook_id, "name": photobook.name})
