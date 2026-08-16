@@ -139,16 +139,28 @@ def recompute_photo_layout_for_pin(pin):
 
 def refresh_cover_photo(photobook):
     """
-    포토북 커버 사진 새로고침 (6.4). 포토북에 이미 포함된 사진(PhotobookPhotoLayout) 중
-    순수 무작위로 1장을 뽑아 Photobook.cover_photo_url에 저장한다.
+    여정 커버 사진 새로고침 (6.4, Photobook.cover_photo_url을 여정 커버로 사용 — "포토북
+    커버"라는 별도 개념은 없다). 여정에 포함된(included_in_segment=True) 핀 전체 중에서
+    대표사진(taste_rank<=3)이 있는 핀을 무작위로 하나 고르고, 그 핀의 대표사진 중에서
+    다시 무작위로 1장을 뽑아 커버로 저장한다.
 
-    명세서 원문은 "취향 프로파일 기준 재정렬 → 상위 10개 → 무작위 1개"였지만, 새로고침마다
-    여정 전체 사진을 다시 스코어링하는 비용이 커서 취향 스코어링 없이 무작위로 단순화하기로
-    결정했다 — docs/spec.md 정정 기록 참고. 포토북에 사진이 하나도 없으면 아무 것도 하지 않는다.
+    도시별로 큐레이션된 포토북 수록 핀(PhotobookPin)으로 후보를 제한하지 않고 여정 전체
+    핀을 후보로 삼는다 — 도시당 3핀 제한 때문에 포토북에 안 뽑힌 핀도 커버 후보가 될 수
+    있어야 한다는 2026-08-16 결정. taste_rank는 5.2.1/5.6에서 이미 계산돼 있는 값을 그대로
+    재사용하고 새로 스코어링하지 않는다 — 명세서 원문의 "취향 프로파일 기준 재정렬 → 상위
+    10개 → 무작위 1개"는 매 새로고침마다 여정 전체를 재스코어링하는 비용이 커서 채택하지
+    않았다 (docs/spec.md 정정 기록 참고). 대표사진이 있는 핀이 하나도 없으면 아무 것도
+    하지 않는다.
     """
-    layouts = list(PhotobookPhotoLayout.objects.filter(photobook_pin__photobook=photobook))
-    if not layouts:
+    candidate_pins = list(
+        Pin.objects.filter(segment=photobook.segment, included_in_segment=True)
+        .filter(photos__taste_rank__lte=3)
+        .distinct()
+    )
+    if not candidate_pins:
         return
-    chosen = random.choice(layouts)
-    photobook.cover_photo_url = chosen.photo.photo_url
+    chosen_pin = random.choice(candidate_pins)
+    representative_photos = list(Photo.objects.filter(pin=chosen_pin, taste_rank__lte=3))
+    chosen_photo = random.choice(representative_photos)
+    photobook.cover_photo_url = chosen_photo.photo_url
     photobook.save(update_fields=["cover_photo_url"])

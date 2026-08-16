@@ -24,7 +24,9 @@ def _auth_headers(user):
 
 
 class PhotobookCoverRefreshTests(TestCase):
-    """6.4(포토북 커버 사진 새로고침) 엔드포인트 검증 (#85)."""
+    """6.4(여정 커버 새로고침) 엔드포인트 검증 (#85). 커버는 여정 전체 핀 중 무작위 1개를
+    고르고, 그 핀의 대표사진(taste_rank<=3) 중 무작위 1장을 쓴다 — 도시별로 포토북에
+    큐레이션된 핀(PhotobookPin)으로 후보가 제한되지 않는다."""
 
     def setUp(self):
         self.user = _make_user()
@@ -32,20 +34,25 @@ class PhotobookCoverRefreshTests(TestCase):
         self.photobook = Photobook.objects.create(segment=self.segment, name="테스트 여행")
         self.factory = APIRequestFactory()
 
-    def _add_photo_to_layout(self, photo_url, order=1):
+    def _make_pin(self, ranks, included_in_segment=True):
+        """ranks: 이 핀에 만들 사진들의 taste_rank 목록(None 포함 가능). 생성된 사진 URL 목록을 반환."""
         pin = Pin.objects.create(
             user=self.user,
             segment=self.segment,
+            included_in_segment=included_in_segment,
             tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
         )
-        photo = Photo.objects.create(
-            pin=pin,
-            captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
-            photo_url=photo_url,
-        )
-        photobook_pin = PhotobookPin.objects.create(photobook=self.photobook, pin=pin, order=order)
-        PhotobookPhotoLayout.objects.create(photobook_pin=photobook_pin, photo=photo, order=1)
-        return photo
+        urls = []
+        for i, rank in enumerate(ranks):
+            url = f"https://example.com/{pin.pin_id}-{i}.jpg"
+            Photo.objects.create(
+                pin=pin,
+                captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+                photo_url=url,
+                taste_rank=rank,
+            )
+            urls.append(url)
+        return pin, urls
 
     def _refresh(self, user=None):
         request = self.factory.post(
@@ -54,20 +61,37 @@ class PhotobookCoverRefreshTests(TestCase):
         )
         return photobook_cover_refresh(request, self.photobook.photobook_id)
 
-    def test_refresh_picks_a_photo_already_in_the_photobook(self):
-        photo_urls = {
-            self._add_photo_to_layout(f"https://example.com/{i}.jpg", order=i).photo_url
-            for i in range(1, 6)
-        }
+    def test_refresh_picks_a_representative_photo_from_some_pin(self):
+        _, urls1 = self._make_pin([1, 2, 3, None])
+        _, urls2 = self._make_pin([1, 2, 3])
+        representative_urls = set(urls1[:3]) | set(urls2)
 
         response = self._refresh()
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(response.data["cover_photo_url"], photo_urls)
+        self.assertIn(response.data["cover_photo_url"], representative_urls)
         self.photobook.refresh_from_db()
         self.assertEqual(self.photobook.cover_photo_url, response.data["cover_photo_url"])
 
-    def test_no_photos_in_photobook_leaves_cover_null(self):
+    def test_pin_without_representative_photos_is_not_a_candidate(self):
+        # taste_rank가 3 초과이거나 없는 사진뿐인 핀은 후보에서 제외되고, 대표사진 있는 핀만 뽑힘
+        self._make_pin([None, 4, 5])
+        _, urls2 = self._make_pin([1, 2, 3])
+
+        response = self._refresh()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(response.data["cover_photo_url"], urls2)
+
+    def test_excluded_pin_is_not_a_candidate(self):
+        self._make_pin([1, 2, 3], included_in_segment=False)
+
+        response = self._refresh()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["cover_photo_url"])
+
+    def test_no_pins_leaves_cover_null(self):
         response = self._refresh()
 
         self.assertEqual(response.status_code, 200)
@@ -75,7 +99,7 @@ class PhotobookCoverRefreshTests(TestCase):
 
     def test_other_users_photobook_returns_404(self):
         other_user = _make_user()
-        self._add_photo_to_layout("https://example.com/1.jpg")
+        self._make_pin([1, 2, 3])
 
         response = self._refresh(user=other_user)
 
