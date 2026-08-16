@@ -5,10 +5,20 @@ taste 온보딩 자체는 사전계산 스크립트(precompute_photo_measurement
 이 모듈을 호출하고, 배포 서버 런타임에서는 사전계산 결과(`taste/photo_measurements.py`)만
 읽는다.
 
-⚠️ 2026-08-16 정정: 위 설명은 taste 온보딩 한정이다. `recommendations` 앱(#71~)이 이
-모듈의 `get_image_embedding`/`measure_all_axes`를 실제 유저 여행 사진 스코어링에 재사용하면서,
-운영 서버에서도 CLIP/torch가 실시간으로 필요해졌다 — 더 이상 "로컬/CI 사전계산 전용"이 아니다.
-배포 인프라에 CLIP 런타임을 어떻게 얹을지는 아직 미해결(`docs/TEMP_NOTES.md` 참고).
+⚠️ 2026-08-16: `recommendations` 앱(#71~)이 이 모듈의 `compute_phash`/`measure_all_axes`를
+실제 유저 여행 사진 스코어링에 재사용한다 — "로컬/CI 사전계산 전용"이 아니라 운영 서버
+런타임에서도 매 요청마다 호출된다.
+
+2026-08-16(#94): CLIP(open-clip-torch/torch) 의존성을 완전히 제거했다. 원래 유사사진
+판별에 CLIP 임베딩+코사인유사도를, 구도/밀도(density) 축 측정에 CLIP+엣지검출 블렌드를
+썼는데, 사진 1장당 CLIP 순전파가 2번씩 들어가는 게 MVP 단계 인프라 부담(EC2 메모리,
+docs/TEMP_NOTES.md의 배포 미해결 이슈) 대비 과하다는 판단. 유사사진 판별은
+perceptual hash(pHash)로 교체(원본 기능명세서가 애초에 "perceptual hash + 시간 근접도"를
+명시하고 있어 스펙에 더 가깝게 되돌아간 것). density는 CLIP 없이 블러+엣지검출 단독으로
+교체 — 엣지검출만 쓰면 미세 텍스처(모래 잔물결 등)와 구도상 여백을 구분 못해 방향이
+틀리는 사례가 실측(온보딩 큐레이션 사진)으로 확인됐으나, Canny 엣지검출 전에 가우시안
+블러를 넣어 미세 텍스처를 뭉개니 큐레이션 사진 3쌍 전부 방향이 정확해짐을 확인하고 채택.
+자세한 근거는 docs/IMPLEMENTATION.md 결정 로그 참고.
 
 인물 감지 방식(얼굴 DNN + 전신/상반신 Haar cascade 조합)은 팀원이 2026-08-11 실제 여행
 사진 40장으로 CLIP 단독 vs 하이브리드를 비교 검증한 결과를 그대로 따른 것이다 — Haar cascade
@@ -17,17 +27,14 @@ taste 온보딩 자체는 사전계산 스크립트(precompute_photo_measurement
 
 import cv2
 import numpy as np
-import open_clip
-import torch
 
-_CLIP_MODEL = None
-_CLIP_PREPROCESS = None
-_CLIP_TOKENIZER = None
+_PHASH_SIZE = 8  # 해시 한 변 길이 — 8이면 64비트 해시
+_PHASH_IMAGE_SIZE = _PHASH_SIZE * 4  # DCT 전 리사이즈 크기 (고주파 영역 확보용)
 
-_DENSITY_PROMPTS = (
-    "a minimal photo with lots of empty negative space",
-    "a busy, densely composed photo filling the frame",
-)
+_DENSITY_BLUR_KSIZE = 11  # 엣지검출 전 가우시안 블러 커널 — 미세 텍스처(모래 등) 제거용
+_DENSITY_EDGE_SCALE = 3500.0  # 블러 후 엣지 비율 → 0~100 스케일링 상수. density 큐레이션
+# 사진(4001~4006)뿐 아니라 카탈로그 전체 66장의 raw 엣지 비율 분포(90th percentile≈0.027)
+# 기준으로 과도한 상한(100) 클리핑을 줄이도록 재보정함 (2026-08-16, #94).
 
 _DNN_MODEL_DIR = __import__("pathlib").Path(__file__).resolve().parent / "dnn_models"
 _FACE_NET = cv2.dnn.readNetFromCaffe(
@@ -82,17 +89,6 @@ def _detect_person(image):
     return person_found, max_ratio
 
 
-def _get_clip():
-    global _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_TOKENIZER
-    if _CLIP_MODEL is None:
-        _CLIP_MODEL, _, _CLIP_PREPROCESS = open_clip.create_model_and_transforms(
-            "ViT-B-32", pretrained="openai"
-        )
-        _CLIP_MODEL.eval()
-        _CLIP_TOKENIZER = open_clip.get_tokenizer("ViT-B-32")
-    return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_TOKENIZER
-
-
 def load_image(path):
     """BGR(cv2 기본 채널 순서) numpy 배열로 이미지를 읽는다."""
     image = cv2.imread(str(path))
@@ -101,20 +97,22 @@ def load_image(path):
     return image
 
 
-def get_image_embedding(image):
-    """CLIP 이미지 임베딩(정규화됨) — recommendations 앱의 유사 사진 판별에 재사용된다."""
-    model, preprocess, _tokenizer = _get_clip()
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    from PIL import Image as PILImage
+def compute_phash(image):
+    """perceptual hash(pHash, DCT 기반) — recommendations 앱의 유사 사진 판별에 재사용된다.
+    64비트(8x8) 불리언 배열을 반환하며, 두 해시의 해밍 거리로 유사도를 비교한다
+    (`hamming_distance` 참고). CLIP 임베딩 대신 채택 — 원본 기능명세서가 애초에
+    "perceptual hash + 시간 근접도"를 명시하고 있음 (#94, docs/IMPLEMENTATION.md 참고)."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    resized = cv2.resize(gray, (_PHASH_IMAGE_SIZE, _PHASH_IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+    dct = cv2.dct(np.float32(resized))
+    dct_low = dct[:_PHASH_SIZE, :_PHASH_SIZE]
+    median = np.median(dct_low)
+    return dct_low > median
 
-    pil_image = PILImage.fromarray(rgb)
 
-    with torch.no_grad():
-        image_input = preprocess(pil_image).unsqueeze(0)
-        image_features = model.encode_image(image_input)
-        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-
-    return image_features.squeeze(0).numpy()
+def hamming_distance(hash_a, hash_b):
+    """두 pHash(불리언 배열) 사이의 해밍 거리 — 값이 작을수록 비슷한 사진."""
+    return int(np.count_nonzero(hash_a != hash_b))
 
 
 def measure_brightness(image):
@@ -137,42 +135,19 @@ def measure_tone(image):
     return float(np.clip((diff + 128) / 255 * 100, 0, 100))
 
 
-def _measure_density_clip(image):
-    model, preprocess, tokenizer = _get_clip()
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    from PIL import Image as PILImage
-
-    pil_image = PILImage.fromarray(rgb)
-
-    with torch.no_grad():
-        image_input = preprocess(pil_image).unsqueeze(0)
-        text_input = tokenizer(list(_DENSITY_PROMPTS))
-
-        image_features = model.encode_image(image_input)
-        text_features = model.encode_text(text_input)
-        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-        similarity = (100.0 * image_features @ text_features.T).softmax(dim=-1)
-        dense_prob = similarity[0, 1].item()  # index 1 = "꽉 차고 밀도 있는" 쪽 확률
-
-    return dense_prob * 100
-
-
-def _measure_density_edges(image):
-    """Canny 엣지 비율 — 여백이 많은 구도는 엣지가 적고, 꽉 찬/복잡한 구도는 엣지가 많다."""
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 100, 200)
-    edge_ratio = (edges > 0).mean()
-    return float(np.clip(edge_ratio * 600, 0, 100))
-
-
 def measure_density(image):
-    # 스펙상 "CLIP + 인물크기(OpenCV) 병합" 방식 — 인물 크기 대신 엣지 밀도로 "얼마나 꽉
-    # 찼는지"를 보완 측정(인물이 없는 풍경 사진도 밀도를 가질 수 있어 더 일반적인 대체 신호).
-    clip_score = _measure_density_clip(image)
-    edge_score = _measure_density_edges(image)
-    return float(0.5 * clip_score + 0.5 * edge_score)
+    """Canny 엣지 비율 — 여백이 많은 구도는 엣지가 적고, 꽉 찬/복잡한 구도는 엣지가 많다.
+    엣지검출 전에 가우시안 블러를 넣어 모래알·잔물결 같은 미세 텍스처를 뭉개고, 바위 윤곽선
+    같은 굵은 구조적 경계만 남긴다 — 블러 없이 엣지검출만 쓰면 "텍스처는 많지만 여백은 넓은"
+    사진(예: 모래사막)에서 방향이 뒤집히는 사례가 실측으로 확인됨 (#94, docs/IMPLEMENTATION.md
+    참고). 이전에는 CLIP 결과와 50:50 블렌딩했으나, 블러 추가로 CLIP 없이도 큐레이션된
+    검증 사진에서 정확한 방향이 나와 CLIP 절반을 제거했다.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (_DENSITY_BLUR_KSIZE, _DENSITY_BLUR_KSIZE), 0)
+    edges = cv2.Canny(blurred, 100, 200)
+    edge_ratio = (edges > 0).mean()
+    return float(np.clip(edge_ratio * _DENSITY_EDGE_SCALE, 0, 100))
 
 
 def measure_photo_type(image):

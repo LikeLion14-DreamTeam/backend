@@ -74,14 +74,22 @@ class ScorePhotoTests(SimpleTestCase):
         self.assertGreaterEqual(score, 0)
         self.assertLessEqual(score, 100)
 
-    def test_closer_match_scores_higher(self):
-        bright_photo = _load(1002)  # brightness axis, "80" 큐레이션 쪽
-        dark_photo = _load(1001)  # brightness axis, "20" 큐레이션 쪽
+    @patch("recommendations.scoring.measure_all_axes")
+    def test_closer_match_scores_higher(self, mock_measure):
+        # 실제 카탈로그 사진은 brightness 검증용으로 고른 것이라 다른 축(밀도 등)이 통제돼
+        # 있지 않다 — 측정값을 직접 모킹해서 "brightness만 다르면 더 가까운 쪽이 더 높은
+        # 점수를 받는다"는 스코어링 공식 자체만 격리해서 검증한다.
         taste_axes = {
             "brightness": 90, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50,
         }
-        bright_score = score_photo(bright_photo, taste_axes)
-        dark_score = score_photo(dark_photo, taste_axes)
+
+        def fake_measure(image):
+            return {**taste_axes, "brightness": image}  # image 인자를 밝기값 자리표시자로 사용
+
+        mock_measure.side_effect = fake_measure
+
+        bright_score = score_photo(85, taste_axes)  # 90에 더 가까움
+        dark_score = score_photo(20, taste_axes)  # 90에서 더 멂
         self.assertGreater(bright_score, dark_score)
 
 
