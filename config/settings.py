@@ -32,7 +32,7 @@ SECRET_KEY = get_secret("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['52.79.135.193', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['52.79.135.193', 'localhost', '127.0.0.1', '.trycloudflare.com']
 
 
 # Application definition
@@ -163,6 +163,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://daewangkimchimandu.vercel.app",
 ]
 
 ### AWS (S3 presigned URL 업로드용) ###
