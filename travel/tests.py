@@ -404,6 +404,31 @@ class PinDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(Pin.objects.filter(pk=self.pin.pin_id).exists())
 
+    def test_delete_last_pin_in_country_removes_stamp(self):
+        self.pin.country_code = "KR"
+        self.pin.save(update_fields=["country_code"])
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
+
+    def test_delete_pin_keeps_stamp_when_other_pins_remain_in_country(self):
+        self.pin.country_code = "KR"
+        self.pin.save(update_fields=["country_code"])
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 2, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            country_code="KR",
+        )
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
+
 
 class TripCurrentViewTests(TestCase):
     url = "/trips/current"
@@ -705,6 +730,41 @@ class TripDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(TravelSegment.objects.filter(pk=self.segment.segment_id).exists())
         self.assertEqual(Pin.objects.count(), 0)
+
+    def test_delete_removes_stamp_when_last_pin_in_country_is_gone(self):
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+            country_code="KR",
+        )
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
+
+    def test_delete_keeps_stamp_when_other_segment_has_pin_in_same_country(self):
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+            country_code="KR",
+        )
+        other_segment = TravelSegment.objects.create(user=self.user, name="다른 여행")
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 5, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=other_segment,
+            country_code="KR",
+        )
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
 
 
 class TripPinsViewTests(TestCase):
