@@ -1,4 +1,24 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from rest_framework import serializers
+
+
+class RoundedDecimalField(serializers.DecimalField):
+    """위도/경도용 DecimalField.
+
+    브라우저 Geolocation API는 소수점 10자리 이상의 원본 정밀도로 좌표를 내려주는데,
+    기본 DecimalField는 이 원본 값의 전체 유효숫자 개수가 max_digits를 넘으면 반올림 없이
+    그대로 거부해버린다("Ensure that there are no more than N digits in total").
+    그래서 max_digits 검증 전에 decimal_places 자리로 먼저 반올림한다 — GPS 오차 범위상
+    소수점 6자리(약 11cm 정밀도)면 충분하므로 값 손실 우려는 없다. (2026-08-17, 프론트 연동
+    중 발견 — docs/IMPLEMENTATION.md 참고)
+    """
+
+    def validate_precision(self, value):
+        if self.decimal_places is not None:
+            quantizer = Decimal(1).scaleb(-self.decimal_places)
+            value = value.quantize(quantizer, rounding=ROUND_HALF_UP)
+        return super().validate_precision(value)
 
 
 class PinCreateRequestSerializer(serializers.Serializer):
@@ -7,8 +27,8 @@ class PinCreateRequestSerializer(serializers.Serializer):
     """
 
     nfc_tag_id = serializers.CharField(required=False, allow_null=True)
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    latitude = RoundedDecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    longitude = RoundedDecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
     address = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=300)
     city = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=100)
     country_name = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=100)
@@ -72,8 +92,8 @@ class PhotoRegisterItemSerializer(serializers.Serializer):
 
     file_id = serializers.CharField()
     captured_at = serializers.DateTimeField()
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    latitude = RoundedDecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    longitude = RoundedDecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
 
 
 class PhotoRegisterRequestSerializer(serializers.Serializer):
