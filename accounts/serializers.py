@@ -49,4 +49,5 @@ class UserSerializer(serializers.ModelSerializer):
             "onboarding_completed",
             "permission_intro_shown",
             "account_identifier",
+            "profile_image_url",
         ]
