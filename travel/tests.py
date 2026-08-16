@@ -8,7 +8,8 @@ from rest_framework.test import APIRequestFactory
 from rest_framework_simplejwt.tokens import AccessToken
 
 from accounts.models import User
-from photobooks.models import Photobook
+from photobooks.models import Photobook, PhotobookPin
+from photobooks.services import build_photobook_pins
 from taste.models import TasteProfileAxis
 from taste.photo_measurement import load_image
 
@@ -403,6 +404,31 @@ class PinDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(Pin.objects.filter(pk=self.pin.pin_id).exists())
 
+    def test_delete_last_pin_in_country_removes_stamp(self):
+        self.pin.country_code = "KR"
+        self.pin.save(update_fields=["country_code"])
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
+
+    def test_delete_pin_keeps_stamp_when_other_pins_remain_in_country(self):
+        self.pin.country_code = "KR"
+        self.pin.save(update_fields=["country_code"])
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 2, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            country_code="KR",
+        )
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
+
 
 class TripCurrentViewTests(TestCase):
     url = "/trips/current"
@@ -610,6 +636,78 @@ class TripDetailViewTests(TestCase):
         pin.refresh_from_db()
         self.assertFalse(pin.included_in_segment)
 
+    def test_patch_pin_exclusion_recomputes_that_citys_photobook(self):
+        photobook = Photobook.objects.create(segment=self.segment, name="여행")
+        base = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        p1 = Pin.objects.create(
+            user=self.user, tagged_at=base, segment=self.segment,
+            included_in_segment=True, city="서울", text_note="메모1",
+        )
+        p2 = Pin.objects.create(
+            user=self.user, tagged_at=base + datetime.timedelta(hours=1), segment=self.segment,
+            included_in_segment=True, city="서울", text_note="메모2",
+        )
+        p3 = Pin.objects.create(
+            user=self.user, tagged_at=base + datetime.timedelta(hours=2), segment=self.segment,
+            included_in_segment=True, city="서울", text_note="메모3",
+        )
+        p4 = Pin.objects.create(
+            user=self.user, tagged_at=base + datetime.timedelta(hours=3), segment=self.segment,
+            included_in_segment=True, city="서울",
+        )
+        build_photobook_pins(photobook)
+        selected_before = set(
+            PhotobookPin.objects.filter(photobook=photobook).values_list("pin_id", flat=True)
+        )
+        self.assertEqual(selected_before, {p1.pin_id, p2.pin_id, p3.pin_id})
+
+        response = self.client.patch(
+            self._url(),
+            data={"pin_exclusions": [{"pin_id": p1.pin_id, "included_in_segment": False}]},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        selected_after = set(
+            PhotobookPin.objects.filter(photobook=photobook).values_list("pin_id", flat=True)
+        )
+        self.assertEqual(selected_after, {p2.pin_id, p3.pin_id, p4.pin_id})
+
+    def test_patch_excluding_pin_not_in_photobook_leaves_selection_unchanged(self):
+        photobook = Photobook.objects.create(segment=self.segment, name="여행")
+        base = datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        p1 = Pin.objects.create(
+            user=self.user, tagged_at=base, segment=self.segment,
+            included_in_segment=True, city="서울", text_note="메모1",
+        )
+        p2 = Pin.objects.create(
+            user=self.user, tagged_at=base + datetime.timedelta(hours=1), segment=self.segment,
+            included_in_segment=True, city="서울", text_note="메모2",
+        )
+        p3 = Pin.objects.create(
+            user=self.user, tagged_at=base + datetime.timedelta(hours=2), segment=self.segment,
+            included_in_segment=True, city="서울", text_note="메모3",
+        )
+        p4 = Pin.objects.create(
+            user=self.user, tagged_at=base + datetime.timedelta(hours=3), segment=self.segment,
+            included_in_segment=True, city="서울",
+        )
+        build_photobook_pins(photobook)
+
+        response = self.client.patch(
+            self._url(),
+            data={"pin_exclusions": [{"pin_id": p4.pin_id, "included_in_segment": False}]},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        selected_after = set(
+            PhotobookPin.objects.filter(photobook=photobook).values_list("pin_id", flat=True)
+        )
+        self.assertEqual(selected_after, {p1.pin_id, p2.pin_id, p3.pin_id})
+
     def test_patch_excluding_pin_not_in_segment_returns_400(self):
         response = self.client.patch(
             self._url(),
@@ -632,6 +730,41 @@ class TripDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(TravelSegment.objects.filter(pk=self.segment.segment_id).exists())
         self.assertEqual(Pin.objects.count(), 0)
+
+    def test_delete_removes_stamp_when_last_pin_in_country_is_gone(self):
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+            country_code="KR",
+        )
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
+
+    def test_delete_keeps_stamp_when_other_segment_has_pin_in_same_country(self):
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+            country_code="KR",
+        )
+        other_segment = TravelSegment.objects.create(user=self.user, name="다른 여행")
+        Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 5, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=other_segment,
+            country_code="KR",
+        )
+        CountryStamp.objects.create(user=self.user, country_code="KR", country_name="대한민국")
+
+        response = self.client.delete(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertTrue(CountryStamp.objects.filter(user=self.user, country_code="KR").exists())
 
 
 class TripPinsViewTests(TestCase):

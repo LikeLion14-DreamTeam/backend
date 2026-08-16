@@ -13,7 +13,11 @@ from rest_framework.response import Response
 
 from accounts.authentication import JWTAccessAuthentication
 from photobooks.models import Photobook
-from photobooks.services import build_photobook_pins, recompute_photo_layout_for_pin
+from photobooks.services import (
+    build_photobook_pins,
+    recompute_photo_layout_for_pin,
+    recompute_photobook_city,
+)
 from products.models import NfcTag
 from recommendations.travel_adapter import rank_pin_photos, refresh_pin_photos
 from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
@@ -583,9 +587,17 @@ def _trip_detail_patch(request, segment):
     photo_count = Photo.objects.filter(pin__in=included).count()
 
     if exclusions:
+        affected_cities = {pin.city for pin in pins_to_update if pin.city}
+        try:
+            photobook = segment.photobook
+        except Photobook.DoesNotExist:
+            photobook = None
+        if photobook is not None:
+            for city in affected_cities:
+                recompute_photobook_city(photobook, city)
         request_logger.info(
-            "PATCH /trips/%s pin_exclusions 반영 — 포토북 재생성은 스킵(photobooks 앱 없음)",
-            segment.segment_id,
+            "PATCH /trips/%s pin_exclusions 반영 — 영향받은 도시 %s 포토북 재계산",
+            segment.segment_id, sorted(affected_cities),
         )
 
     return Response(
@@ -605,7 +617,15 @@ def _trip_detail_delete(segment):
     cascade로 핀/사진/음성메모까지 삭제
     """
     segment_id = segment.segment_id
+    user = segment.user
+    country_codes = list(
+        Pin.objects.filter(segment=segment)
+        .exclude(country_code__isnull=True)
+        .values_list("country_code", flat=True)
+        .distinct()
+    )
     segment.delete()
+    _cleanup_orphaned_country_stamps(user, country_codes)
     request_logger.info(
         "DELETE /trips/%s — cascade 삭제(핀/사진/음성메모)", segment_id
     )
@@ -730,6 +750,19 @@ def _pin_detail_patch(request, pin):
     return Response({"pin_id": pin.pin_id, "place_name": pin.place_name, "text_note": pin.text_note})
 
 
+def _cleanup_orphaned_country_stamps(user, country_codes):
+    """핀 삭제(개별 삭제 또는 여행 구간 삭제) 이후, 그 국가에 남은 핀이 하나도 없으면
+    도장도 함께 제거한다 (스펙 3.2: "국가의 마지막 핀이 삭제되면 해당 국가의 도장도 함께
+    제거한다"). country_codes는 삭제 *이전*에 미리 뽑아둔 값을 받는다 — cascade 삭제 후에는
+    그 핀들을 더 이상 조회할 수 없기 때문이다."""
+    for country_code in set(country_codes):
+        if not country_code:
+            continue
+        still_has_pins = Pin.objects.filter(user=user, country_code=country_code).exists()
+        if not still_has_pins:
+            CountryStamp.objects.filter(user=user, country_code=country_code).delete()
+
+
 def _pin_detail_delete(pin):
     """DELETE /pins/{pinId} (5.3). 진행 중(segment_id NULL)인 핀만 삭제 가능."""
     if pin.segment_id is not None:
@@ -739,7 +772,10 @@ def _pin_detail_delete(pin):
         )
 
     pin_id = pin.pin_id
+    user = pin.user
+    country_code = pin.country_code
     pin.delete()
+    _cleanup_orphaned_country_stamps(user, [country_code])
     request_logger.info("DELETE /pins/%s", pin_id)
     return Response(status=status.HTTP_204_NO_CONTENT)
 
