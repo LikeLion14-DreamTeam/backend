@@ -102,6 +102,30 @@ def build_photobook_pins(photobook):
             _write_photo_layout(photobook_pin, pin)
 
 
+def recompute_photobook_city(photobook, city):
+    """
+    4.3(PATCH /trips/{segmentId} pin_exclusions)으로 핀 제외/재포함이 일어나면 그 도시의
+    포토북 수록 핀 구성이 바뀔 수 있다. build_photobook_pins와 같은 선정 로직
+    (_select_pins_for_city)을 그 도시 범위로만 다시 돌려 PhotobookPin/PhotobookPhotoLayout을
+    갱신한다. 제외된 핀이 애초에 선정되지 않았던 핀이면 결과가 그대로 유지되고, 선정돼
+    있었으면 다른 후보로 자동 교체된다 — 별도 "선정 여부 확인" 분기가 필요 없다.
+    """
+    segment = photobook.segment
+    pins = (
+        Pin.objects.filter(segment=segment, included_in_segment=True, city=city)
+        .select_related("voicememo")
+        .order_by("tagged_at")
+    )
+
+    PhotobookPin.objects.filter(photobook=photobook, pin__city=city).delete()
+
+    order = 0
+    for pin in _select_pins_for_city(pins):
+        order += 1
+        photobook_pin = PhotobookPin.objects.create(photobook=photobook, pin=pin, order=order)
+        _write_photo_layout(photobook_pin, pin)
+
+
 def recompute_photo_layout_for_pin(pin):
     """
     종료된 여정의 핀에 사진이 나중에 추가됐을 때 호출

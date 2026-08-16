@@ -13,7 +13,11 @@ from rest_framework.response import Response
 
 from accounts.authentication import JWTAccessAuthentication
 from photobooks.models import Photobook
-from photobooks.services import build_photobook_pins, recompute_photo_layout_for_pin
+from photobooks.services import (
+    build_photobook_pins,
+    recompute_photo_layout_for_pin,
+    recompute_photobook_city,
+)
 from products.models import NfcTag
 from recommendations.travel_adapter import rank_pin_photos, refresh_pin_photos
 from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
@@ -583,9 +587,17 @@ def _trip_detail_patch(request, segment):
     photo_count = Photo.objects.filter(pin__in=included).count()
 
     if exclusions:
+        affected_cities = {pin.city for pin in pins_to_update if pin.city}
+        try:
+            photobook = segment.photobook
+        except Photobook.DoesNotExist:
+            photobook = None
+        if photobook is not None:
+            for city in affected_cities:
+                recompute_photobook_city(photobook, city)
         request_logger.info(
-            "PATCH /trips/%s pin_exclusions 반영 — 포토북 재생성은 스킵(photobooks 앱 없음)",
-            segment.segment_id,
+            "PATCH /trips/%s pin_exclusions 반영 — 영향받은 도시 %s 포토북 재계산",
+            segment.segment_id, sorted(affected_cities),
         )
 
     return Response(
