@@ -1412,6 +1412,41 @@
 - **미확정**: 기존 핀은 `country_code=NULL`로 남고 소급 채우기는 불가능 — `country_name`과
   동일한 한계.
 
+### 2026-08-16 — 사진 분석 파이프라인에서 CLIP 의존성 완전 제거 (#94)
+- **결정**: `open-clip-torch`/`torch`를 런타임·의존성 양쪽에서 전부 제거했다.
+  - **유사사진 판별(dedup)**: CLIP 임베딩+코사인유사도 → perceptual hash(pHash, DCT 기반
+    64비트 해시)+해밍거리(`HAMMING_THRESHOLD=10`). `taste/photo_measurement.py`에
+    `compute_phash`/`hamming_distance` 신설, `recommendations/scoring.py`의
+    `reduce_similar_photos`가 이걸 사용하도록 교체.
+  - **구도/밀도(density) 축**: CLIP(텍스트 프롬프트 비교)+엣지검출 50:50 블렌드 → 가우시안
+    블러(커널 11) 후 Canny 엣지검출 단독. 스케일 상수 `_DENSITY_EDGE_SCALE=3500`은 density
+    큐레이션 사진(4001~4006)뿐 아니라 카탈로그 전체 66장의 raw 엣지 비율 분포(90th
+    percentile≈0.027)를 기준으로 과도한 상한(100) 클리핑을 줄이도록 보정.
+  - **인물감지(photo_type)**: 변경 없음 — 원래도 CLIP이 아니라 별도 얼굴 DNN+Haar cascade.
+- **이유**: 사진 1장당 CLIP 순전파가 2번(dedup+density)씩 들어가는 게, 팀이 받은 "MVP
+  단계에 과하다"는 피드백과 `docs/TEMP_NOTES.md`의 미해결 배포 이슈("EC2에 CLIP 런타임을
+  어떻게 얹을지") 대비 부담이 크다고 판단. OpenAI API 전면 교체도 검토했으나, 지연시간(API
+  왕복 1~5초+, 로컬 추론보다 느림)과 비결정성(같은 사진도 호출마다 점수가 달라질 수 있어
+  취향 매칭의 재현성이 깨짐), 유사사진 판별에 대응하는 API가 마땅치 않다는 점 때문에 기각.
+  - dedup을 pHash로 바꾼 건 원본 기능명세서가 애초에 "perceptual hash + 시간 근접도"를
+    명시하고 있어, 오히려 스펙에 더 가깝게 되돌아간 결정.
+  - density는 엣지검출만 쓰면 미세 텍스처(모래 잔물결 등)와 구도상 여백을 구분 못해 방향이
+    틀리는 사례를 온보딩 큐레이션 사진(4001/4002 쌍)으로 실측 확인했으나, 엣지검출 전
+    가우시안 블러를 추가하니 큐레이션 사진 3쌍 전부 정확한 방향이 나옴을 확인하고 CLIP 없이
+    채택. 블러 없는 엣지검출 단독 방식은 기각.
+- **부수 영향**: 밀도 공식이 바뀌어 `taste/photo_measurements.py`(온보딩 카탈로그 사전계산
+  값)를 `precompute_photo_measurements` 커맨드로 재생성함 — A/B 라운드 자체는 큐레이션된
+  참조값(20/80)을 그대로 쓰므로 온보딩 결과엔 영향 없고, 무드보드(6~7라운드)와 실제 유저
+  사진 스코어링에만 영향.
+  `recommendations/tests.py`의 `test_closer_match_scores_higher`가 실제 카탈로그 사진(다른
+  축이 통제 안 됨)에 의존하다가 밀도 공식 변경으로 우연히 실패해서, `measure_all_axes`를
+  모킹해 brightness 축만 격리 검증하도록 테스트 자체를 고쳤다.
+- **영향 범위**: `taste/photo_measurement.py`, `recommendations/scoring.py`,
+  `taste/photo_measurements.py`(재생성), `recommendations/tests.py`, `pyproject.toml`/
+  `poetry.lock`(open-clip-torch/torch/pillow 제거).
+- **미확정**: `HAMMING_THRESHOLD=10`, `_DENSITY_BLUR_KSIZE=11`, `_DENSITY_EDGE_SCALE=3500`
+  전부 온보딩 카탈로그 66장 기준 잠정값 — 실제 유저 여행 사진으로 재검증 필요.
+
 ---
 
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)

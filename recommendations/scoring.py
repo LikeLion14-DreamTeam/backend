@@ -14,8 +14,9 @@ travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드
 ## 알고리즘 (기능명세서 5.2.1 / 5.2.3 기준)
 
 1. 유사 사진 축소(`reduce_similar_photos`, 5.2.1) — 사진이 1장이면 축소 생략. 촬영 시각이
-   가깝고(`TIME_PROXIMITY_SECONDS` 이내) + CLIP 임베딩 코사인 유사도가 높은
-   (`SIMILARITY_THRESHOLD` 이상) 사진들을 하나로 묶어 대표 1장만 남긴다.
+   가깝고(`TIME_PROXIMITY_SECONDS` 이내) + perceptual hash(pHash) 해밍 거리가 가까운
+   (`HAMMING_THRESHOLD` 이하) 사진들을 하나로 묶어 대표 1장만 남긴다 (2026-08-16(#94)부터
+   CLIP 임베딩+코사인유사도 대신 pHash 사용 — docs/IMPLEMENTATION.md 참고).
 2. 스코어링(`score_photo`) — `taste.photo_measurement.measure_all_axes()`로 사진의 5개 축
    실측값을 구하고, 유저의 `TasteProfileAxis` 값과 축별 절댓값 차이의 평균을 100에서 뺀 값을
    점수로 쓴다(차이가 작을수록 = 취향에 가까울수록 높은 점수).
@@ -44,7 +45,7 @@ travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드
 반환한다(순위는 `Photo.taste_rank`에 그대로 저장하면 됨).
 
 ## 아직 미정 (travel 연동 시 확정 필요)
-- `TIME_PROXIMITY_SECONDS`/`SIMILARITY_THRESHOLD` 구체적인 수치 — 지금은 임의로 잡은 초기값,
+- `TIME_PROXIMITY_SECONDS`/`HAMMING_THRESHOLD` 구체적인 수치 — 지금은 임의로 잡은 초기값,
   실제 여행 사진으로 재검증 필요.
 
 ## 빈 입력 처리
@@ -54,31 +55,26 @@ travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드
 
 import random
 
-import numpy as np
-
-from taste.photo_measurement import get_image_embedding, measure_all_axes
+from taste.photo_measurement import compute_phash, hamming_distance, measure_all_axes
 
 TIME_PROXIMITY_SECONDS = 120
-SIMILARITY_THRESHOLD = 0.9
+# pHash(64비트) 해밍 거리 임계값 — 이 이하면 "같은 순간을 거의 똑같이 찍은 사진"으로 본다.
+# 값이 작을수록 엄격(더 비슷해야 중복 판정), 64비트 중 10 이하는 근접중복 판별에 흔히
+# 쓰이는 값 (2026-08-16, #94 CLIP→pHash 전환 시 채택 — 실제 여행 사진으로 재검증 필요).
+HAMMING_THRESHOLD = 10
 
 INITIAL_RECOMMENDATION_COUNT = 3
 REFRESH_CANDIDATE_POOL_SIZE = 10
 REFRESH_RECOMMENDATION_COUNT = 3
 
 
-def _cosine_similarity(a, b):
-    a = np.asarray(a)
-    b = np.asarray(b)
-    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
-
-
 def reduce_similar_photos(photos):
-    """(photo_id, image, captured_at) 리스트를 촬영 시각 근접 + 이미지 유사도로 줄인다."""
+    """(photo_id, image, captured_at) 리스트를 촬영 시각 근접 + 이미지 유사도(pHash)로 줄인다."""
     if len(photos) <= 1:
         return list(photos)
 
     sorted_photos = sorted(photos, key=lambda p: p[2])
-    embeddings = {photo_id: get_image_embedding(image) for photo_id, image, _ in sorted_photos}
+    hashes = {photo_id: compute_phash(image) for photo_id, image, _ in sorted_photos}
 
     kept = []
     for photo in sorted_photos:
@@ -86,7 +82,7 @@ def reduce_similar_photos(photos):
         is_duplicate = False
         for kept_id, _kept_image, kept_captured_at in kept:
             time_close = abs((captured_at - kept_captured_at).total_seconds()) <= TIME_PROXIMITY_SECONDS
-            if time_close and _cosine_similarity(embeddings[photo_id], embeddings[kept_id]) >= SIMILARITY_THRESHOLD:
+            if time_close and hamming_distance(hashes[photo_id], hashes[kept_id]) <= HAMMING_THRESHOLD:
                 is_duplicate = True
                 break
         if not is_duplicate:
