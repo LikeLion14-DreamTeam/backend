@@ -14,6 +14,11 @@ urlpatterns = [
         name="selection-photos",
     ),
     path(
+        "users/me/onboarding/progress",
+        views.get_onboarding_progress,
+        name="onboarding-progress",
+    ),
+    path(
         "users/me/taste-profile/axes",
         views.list_taste_profile_axes,
         name="taste-profile-axes",
