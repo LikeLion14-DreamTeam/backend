@@ -1449,6 +1449,23 @@
 
 ---
 
+### 2026-08-16 — 구글 로그인 프로필 이미지 저장 (#96)
+- **결정**: `User.profile_image_url` 필드 추가. `POST /auth/google`에서 검증된 구글 ID
+  토큰의 `picture` 클레임을 서버가 저장한다. 신규 가입은 그대로 저장, 재로그인은 `picture`
+  값이 있을 때만 덮어쓰고 없으면(구글이 안 내려주는 경우) 기존 값을 유지한다. `PATCH
+  /users/me`에는 노출하지 않아 프런트가 직접 값을 써서 덮어쓸 경로가 없다 — 오직 서버가
+  검증한 토큰 클레임에서만 채워진다. `GET /users/me`, `POST /auth/google` 응답
+  (`UserSerializer`)에 필드 노출.
+- **이유**: 프런트/QA 단계에서 프로필 이미지 표시가 필요하다는 외부 요구사항. 클라이언트
+  입력을 신뢰하지 않고 서버가 검증한 ID 토큰 클레임만 신뢰 소스로 삼는 게 원칙(계정 정보
+  위변조 방지).
+- **영향 범위**: `accounts/models.py`(필드 추가, 마이그레이션
+  `0006_user_profile_image_url`), `accounts/serializers.py`(`UserSerializer` 필드
+  추가), `accounts/views.py`(`google_login`), `accounts/tests.py`.
+- **미확정**: 없음.
+
+---
+
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
 
 ```
