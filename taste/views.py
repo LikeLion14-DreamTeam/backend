@@ -162,6 +162,16 @@ def submit_selection_photo(request):
         user=user, round_no=round_no, photo_id=photo_id, defaults={"status": is_selected}
     )
 
+    # A/B 라운드는 2장 중 1장만 골라야 하는 단일 선택이다. 프론트가 새로 고른 사진만
+    # true로 보내고 이전 선택을 false로 되돌리지 않으면 그 라운드에 true가 2개(또는
+    # 편집 중 일시적으로 0개)가 남아, 축 계산(_ab_value)이 그 라운드 신호를 통째로
+    # 놓치거나 엉뚱한 사진을 기준으로 반영하는 문제가 있었다. 서버가 "라운드당 true는
+    # 항상 1개"를 직접 보장해 프론트 호출 방식과 무관하게 안전하게 만든다.
+    if is_selected and round_no in AB_ROUND_NUMBERS:
+        SelectionPhoto.objects.filter(user=user, round_no=round_no).exclude(photo_id=photo_id).update(
+            status=False
+        )
+
     # 이미 존재하는 행(=지난 라운드에서 이미 제출된 사진)의 status만 덮어쓰는 경우엔 개수
     # 정합성 재검증·라운드 전진을 건너뛴다. 검증을 매번 다시 돌리면, 이미 다 찬 라운드에서
     # 선택을 바꾸려고 두 번 나눠 제출할 때 그 중간 상태가 일시적으로 정합성 조건을 깨서

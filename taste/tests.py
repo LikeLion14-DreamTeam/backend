@@ -600,3 +600,37 @@ class SubmitSelectionPhotoViewTests(TestCase):
             user=self.user, round_no=1, photo_id=changed_photo["photo_id"]
         )
         self.assertEqual(updated.status, changed_photo["value"] != 80)
+        # 새로 true가 된 사진 말고는 라운드에 true가 남아있으면 안 됨 (라디오 버튼처럼 단일 선택 유지)
+        true_photo_ids = set(
+            SelectionPhoto.objects.filter(user=self.user, round_no=1, status=True).values_list(
+                "photo_id", flat=True
+            )
+        )
+        self.assertEqual(true_photo_ids, {changed_photo["photo_id"]})
+
+    def test_new_true_selection_clears_other_photo_in_same_ab_round(self):
+        """프론트가 이전 선택을 명시적으로 false로 안 돌리고, 새로 고른 사진만 true로
+        보내도 이전 선택은 서버가 자동으로 false 처리해야 한다."""
+        low_photo, high_photo = self.round1_photos[0], self.round1_photos[1]
+
+        self.client.post(
+            self.url,
+            data={"photo_id": low_photo["photo_id"], "round_no": 1, "status": True},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        # low_photo를 false로 되돌리는 호출 없이, high_photo만 true로 보냄
+        response = self.client.post(
+            self.url,
+            data={"photo_id": high_photo["photo_id"], "round_no": 1, "status": True},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        low = SelectionPhoto.objects.get(user=self.user, round_no=1, photo_id=low_photo["photo_id"])
+        self.assertFalse(low.status)
+
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_round, 2)
