@@ -300,6 +300,52 @@ def _trip_current_patch(request):
     return Response(_trip_current_summary(request.user))
 
 
+@api_view(["GET"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def trip_current_pins(request):
+    """
+    GET /trips/current/pins (신규) — 진행 중인 여행(segment_id=NULL)의 핀 목록 조회.
+
+    3.1(GET /trips/current)은 집계값만 반환해 지도에 핀을 찍거나 진행 중 여행을 선택
+    목록에 보여줄 방법이 없었다 — 프론트 피드백으로 발견된 갭. 4.5(GET /trips/{segmentId}/pins)와
+    응답 구조를 맞추되, 아직 세그먼트에 배정되지 않은 핀이라 included_in_segment 개념이
+    없어 그 필드만 뺐다. docs/IMPLEMENTATION.md 참고.
+    """
+    cursor_id, limit = _parse_pagination(request)
+
+    qs = (
+        Pin.objects.filter(user=request.user, segment__isnull=True)
+        .annotate(photo_count=Count("photos"))
+        .order_by("pin_id")
+    )
+    if cursor_id is not None:
+        qs = qs.filter(pin_id__gt=cursor_id)
+
+    pins = list(qs[: limit + 1])
+    next_cursor = None
+    if len(pins) > limit:
+        next_cursor = str(pins[limit - 1].pin_id)
+        pins = pins[:limit]
+
+    return Response(
+        {
+            "pins": [
+                {
+                    "pin_id": p.pin_id,
+                    "place_name": p.place_name,
+                    "latitude": p.latitude,
+                    "longitude": p.longitude,
+                    "photo_count": p.photo_count,
+                    "tagged_at": p.tagged_at,
+                }
+                for p in pins
+            ],
+            "next_cursor": next_cursor,
+        }
+    )
+
+
 def _default_trip_name(pins, start_at, end_at):
     """
     name 미입력 시 기본 이름

@@ -14,6 +14,7 @@ urlpatterns = [
     path("pins/<int:pin_id>/voice-memos", views.pin_voice_memos, name="pin-voice-memos"),
     path("photos/<int:photo_id>", views.photo_delete, name="photo-delete"),
     path("trips/current", views.trip_current, name="trip-current"),
+    path("trips/current/pins", views.trip_current_pins, name="trip-current-pins"),
     path("trips", views.trip_list_or_create, name="trip-list-or-create"),
     path("trips/<int:segment_id>", views.trip_detail, name="trip-detail"),
     path("trips/<int:segment_id>/pins", views.trip_pins, name="trip-pins"),
