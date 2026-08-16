@@ -62,6 +62,57 @@ class GoogleLoginViewTests(TestCase):
         self.assertEqual(existing.email, "changed@example.com")
 
     @patch("accounts.views.google_id_token.verify_oauth2_token")
+    def test_new_user_saves_profile_image_url(self, mock_verify, mock_client_id):
+        mock_verify.return_value = {
+            "sub": "google-sub-4",
+            "email": "picture@example.com",
+            "picture": "https://example.com/photo.jpg",
+        }
+
+        response = self.client.post(
+            self.url, data={"google_id_token": "dummy"}, content_type="application/json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["user"]["profile_image_url"], "https://example.com/photo.jpg")
+        user = User.objects.get(account_identifier="google-sub-4")
+        self.assertEqual(user.profile_image_url, "https://example.com/photo.jpg")
+
+    @patch("accounts.views.google_id_token.verify_oauth2_token")
+    def test_existing_user_profile_image_url_is_updated(self, mock_verify, mock_client_id):
+        existing = _make_user(
+            account_identifier="google-sub-5",
+            email="old@example.com",
+            profile_image_url="https://example.com/old.jpg",
+        )
+        mock_verify.return_value = {
+            "sub": "google-sub-5",
+            "email": "old@example.com",
+            "picture": "https://example.com/new.jpg",
+        }
+
+        self.client.post(self.url, data={"google_id_token": "dummy"}, content_type="application/json")
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.profile_image_url, "https://example.com/new.jpg")
+
+    @patch("accounts.views.google_id_token.verify_oauth2_token")
+    def test_existing_user_profile_image_url_preserved_when_picture_missing(
+        self, mock_verify, mock_client_id
+    ):
+        existing = _make_user(
+            account_identifier="google-sub-6",
+            email="old@example.com",
+            profile_image_url="https://example.com/old.jpg",
+        )
+        mock_verify.return_value = {"sub": "google-sub-6", "email": "old@example.com"}
+
+        self.client.post(self.url, data={"google_id_token": "dummy"}, content_type="application/json")
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.profile_image_url, "https://example.com/old.jpg")
+
+    @patch("accounts.views.google_id_token.verify_oauth2_token")
     def test_invalid_google_token_returns_400(self, mock_verify, mock_client_id):
         mock_verify.side_effect = ValueError("invalid token")
 
@@ -94,7 +145,7 @@ class MeGetViewTests(TestCase):
     url = "/users/me"
 
     def setUp(self):
-        self.user = _make_user()
+        self.user = _make_user(profile_image_url="https://example.com/photo.jpg")
 
     def test_missing_token_returns_401(self):
         response = self.client.get(self.url)
@@ -106,6 +157,7 @@ class MeGetViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["user_id"], self.user.pk)
+        self.assertEqual(body["profile_image_url"], "https://example.com/photo.jpg")
         self.assertEqual(body["pin_count"], 0)
         self.assertEqual(body["completed_trip_count"], 0)
         self.assertEqual(body["visited_city_count"], 0)

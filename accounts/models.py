@@ -27,6 +27,11 @@ class User(models.Model):
     )
     email = models.EmailField(max_length=150)
 
+    # 구글 ID 토큰의 picture 클레임 — 로그인 시(POST /auth/google)에만 서버가 채운다.
+    # 프런트가 직접 값을 보내 덮어쓸 수 있는 경로는 없음(PATCH /users/me에 노출 안 함).
+    # 재로그인 시 picture 값이 없으면 기존 값을 그대로 유지한다. (#96)
+    profile_image_url = models.CharField(max_length=500, null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)  # 행이 처음 생성될 때 자동 기록
 
     # 로그인 후 온보딩 화면으로 보낼지, 바로 홈으로 보낼지 분기용

@@ -61,6 +61,7 @@ def google_login(request):
 
     account_identifier = idinfo.get("sub")
     email = idinfo.get("email")
+    picture = idinfo.get("picture")  # 검증된 ID 토큰 클레임에서만 가져온다 (#96)
     if not account_identifier or not email:
         return Response(
             {"message": "구글 계정 정보가 올바르지 않습니다.", "code": "VALIDATION_ERROR"},
@@ -70,12 +71,20 @@ def google_login(request):
     # 우리 User 테이블에서 조회, 없으면 새로 생성
     user, created = User.objects.get_or_create(
         account_identifier=account_identifier,
-        defaults={"email": email},
+        defaults={"email": email, "profile_image_url": picture},
     )
+
+    update_fields = []
     if not created and user.email != email:
         # 기존 회원이면 이메일이 바뀌었을 수 있으니 최신 값으로 갱신
         user.email = email
-        user.save(update_fields=["email"])
+        update_fields.append("email")
+    if not created and picture and user.profile_image_url != picture:
+        # picture 클레임이 없으면(구글이 안 내려줬으면) 기존 값을 그대로 유지한다
+        user.profile_image_url = picture
+        update_fields.append("profile_image_url")
+    if update_fields:
+        user.save(update_fields=update_fields)
 
     session_token = issue_session_token(user)
 
