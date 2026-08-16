@@ -13,6 +13,46 @@
 
 ## 결정 로그
 
+### 2026-08-17 — [taste] 온보딩 이전 라운드 재제출(답변 수정) 허용 + 진행 상태 조회 API 신설
+- **결정**:
+  1. `submit_basic_question_response`/`submit_selection_photo`가 지금까지는 `round_no`가
+     `OnboardingProgress`의 현재 커서(`current_stage`+`current_round`)와 정확히 일치할 때만
+     받아주고, 이미 지나간(이미 답변한) 라운드로 오는 요청은 전부 400
+     `VALIDATION_ERROR`("현재 진행 중인 라운드가 아닙니다.")로 막았다. 이제 커서보다 과거인
+     라운드는 답변/선택 데이터만 덮어쓰고 커서(스테이지·라운드)는 그대로 둔다. 미래 라운드로
+     건너뛰는 시도는 기존처럼 계속 막는다.
+  2. `submit_selection_photo`는 한 라운드가 여러 번의 POST로 채워지는 구조라, "이미 다 찬
+     라운드"를 편집할 때 개수 정합성(1/2, 3/9) 검증을 매 요청마다 다시 돌리면 편집 중간
+     상태(예: A/B 두 장 중 선택을 바꾸려고 두 번 나눠 보내는 경우)가 일시적으로 조건을 깨서
+     정상 편집 흐름이 400으로 막히는 문제가 있었다. 그래서 `SelectionPhoto.objects
+     .update_or_create()`가 반환하는 `created` 플래그를 기준으로, **새로 생성된 행일 때만**
+     개수 검증과 `_advance_progress()`를 수행하고, 기존 행을 덮어쓰는 편집 요청은 검증 없이
+     저장만 한다. 부작용: 과거 라운드 편집으로 특정 라운드의 True 개수가 일시적으로
+     1/2·3/9 기준을 벗어나도 서버가 막지 않는다 — 이미 커서가 지나간 라운드라 프로파일
+     축(`TasteProfileAxis`) 재계산에 다시 반영되지 않으므로(아래 3번) 실질적 영향은 없다고
+     판단.
+  3. 과거 라운드 편집은 `TasteProfileAxis` 재계산을 **트리거하지 않는다** — 단순히 저장된
+     답변/선택 기록만 고친다. `_advance_progress()`를 호출하지 않으므로 재추천/재학습과
+     무관.
+  4. 완료(COMPLETED) 상태에서의 개별 라운드 재수정은 이번 범위에서 제외. 기존처럼 기본질문
+     1라운드 재제출만 재학습(7.3) 트리거로 처리하고, 그 외 완료 후 편집은 계속 400.
+  5. `GET /users/me/onboarding/progress` 신규 추가 — `current_stage`/`current_round`/
+     `is_retrain`/`completed_at`과, 유저의 `BasicQuestionResponse`/`SelectionPhoto` 전체
+     이력을 함께 반환. 이 API가 없으면 프론트가 재진입 시 몇 라운드까지 왔는지, 뒤로가기
+     UI에 프리필할 이전 답변이 뭔지 알 방법이 없었다.
+- **이유**: spec.md:235-236(2.4 온보딩 이어하기 — "사진과 전체 진행 상태를 확인할 수 있다",
+  "다음 진입 시 이전 진행 상태를 이어서 진행")이 이미 요구하는 기능인데 조회 API 자체가
+  구현돼 있지 않았음. 뒤로가기 답변 수정은 사용자(PM) 명시 지시.
+  spec.md:242("완료 후에는 제공 안 함")에 따라 COMPLETED 이후의 개별 라운드 재수정과, 중도
+  이탈 계정을 처음부터 리셋하는 기능은 스펙에 없는 로직이라 이번에 구현하지 않음(필요 시
+  별도 확정 후 진행).
+- **영향 범위**: `taste/views.py`(`submit_basic_question_response`, `submit_selection_photo`,
+  `get_onboarding_progress` 신규), `taste/serializers.py`(`OnboardingProgressSerializer`
+  신규), `taste/urls.py`, `taste/tests.py`. 모델/마이그레이션 변경 없음. 신규 엔드포인트라
+  `docs/API_CHANGES.md`에도 같이 기록.
+- **미확정**: 완료(COMPLETED) 후 개별 라운드 재수정, 중도 이탈 계정의 "처음부터 재시작"
+  경로 — 둘 다 필요 여부/트리거 방식이 아직 안 정해짐.
+
 ### 2026-08-14 — [accounts] Session 테이블 제거, JWT 무상태 인증으로 전환
 - **결정**: `accounts.models.Session`을 삭제하고, `djangorestframework-simplejwt`로 access_token(15분)/
   refresh_token(14일) 쌍을 발급하는 무상태 방식으로 전환. 서버에는 토큰을 저장하는 테이블이 없다.

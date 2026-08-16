@@ -423,14 +423,34 @@ class SubmitBasicQuestionResponseViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(BasicQuestionResponse.objects.filter(user=self.user, round_no=2).exists())
 
-    def test_resubmitting_completed_round_without_being_retrain_returns_400(self):
+    def test_resubmitting_already_answered_round_updates_answer_without_moving_cursor(self):
+        BasicQuestionResponse.objects.create(user=self.user, round_no=1, answer="A")
         OnboardingProgress.objects.create(
             user=self.user, current_stage=OnboardingStage.AB_SELECTION, current_round=1
         )
 
         response = self.client.post(
             self.url,
-            data={"round_no": 1, "response": "A"},
+            data={"round_no": 1, "response": "B"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        answer = BasicQuestionResponse.objects.get(user=self.user, round_no=1)
+        self.assertEqual(answer.answer, "B")
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_stage, OnboardingStage.AB_SELECTION)
+        self.assertEqual(progress.current_round, 1)
+
+    def test_resubmitting_future_round_returns_400(self):
+        OnboardingProgress.objects.create(
+            user=self.user, current_stage=OnboardingStage.BASIC_QUESTION, current_round=1
+        )
+
+        response = self.client.post(
+            self.url,
+            data={"round_no": 3, "response": "A"},
             content_type="application/json",
             **_auth_headers(self.user),
         )
@@ -448,6 +468,37 @@ class SubmitBasicQuestionResponseViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         progress = OnboardingProgress.objects.get(user=self.user)
         self.assertEqual(progress.current_round, 2)
+
+class GetOnboardingProgressViewTests(TestCase):
+    url = "/users/me/onboarding/progress"
+
+    def setUp(self):
+        self.user = _make_user()
+
+    def test_missing_token_returns_401(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_returns_current_progress_and_history(self):
+        OnboardingProgress.objects.create(
+            user=self.user, current_stage=OnboardingStage.AB_SELECTION, current_round=2
+        )
+        BasicQuestionResponse.objects.create(user=self.user, round_no=1, answer="A")
+        SelectionPhoto.objects.create(user=self.user, round_no=1, photo_id=1001, status=True)
+
+        response = self.client.get(self.url, **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["current_stage"], "AB_SELECTION")
+        self.assertEqual(data["current_round"], 2)
+        self.assertEqual(len(data["basic_question_responses"]), 1)
+        self.assertEqual(len(data["selection_photos"]), 1)
+
+    def test_creates_progress_if_missing(self):
+        response = self.client.get(self.url, **_auth_headers(self.user))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(OnboardingProgress.objects.filter(user=self.user).exists())
 
 
 class SubmitSelectionPhotoViewTests(TestCase):
@@ -515,3 +566,37 @@ class SubmitSelectionPhotoViewTests(TestCase):
 
         progress = OnboardingProgress.objects.get(user=self.user)
         self.assertEqual(progress.current_round, 2)
+
+    def test_resubmitting_past_round_updates_selection_without_advancing_further(self):
+        for photo in self.round1_photos:
+            self.client.post(
+                self.url,
+                data={
+                    "photo_id": photo["photo_id"],
+                    "round_no": 1,
+                    "status": photo["value"] == 80,
+                },
+                content_type="application/json",
+                **_auth_headers(self.user),
+            )
+        # 지금은 2라운드로 넘어간 상태 — 1라운드에서 선택했던 사진을 다시 골라서 제출
+        changed_photo = self.round1_photos[0]
+        response = self.client.post(
+            self.url,
+            data={
+                "photo_id": changed_photo["photo_id"],
+                "round_no": 1,
+                "status": changed_photo["value"] != 80,
+            },
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        progress = OnboardingProgress.objects.get(user=self.user)
+        self.assertEqual(progress.current_stage, OnboardingStage.AB_SELECTION)
+        self.assertEqual(progress.current_round, 2)
+        updated = SelectionPhoto.objects.get(
+            user=self.user, round_no=1, photo_id=changed_photo["photo_id"]
+        )
+        self.assertEqual(updated.status, changed_photo["value"] != 80)

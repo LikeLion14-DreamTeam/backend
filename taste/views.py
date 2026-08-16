@@ -21,6 +21,7 @@ from .models import (
 from .onboarding_completion import compute_and_save_taste_profile, regenerate_taste_text
 from .serializers import (
     BasicQuestionResponseSerializer,
+    OnboardingProgressSerializer,
     SelectionPhotoSerializer,
     TasteProfileAxisSerializer,
     TasteProfileAxisUpdateSerializer,
@@ -68,24 +69,32 @@ def submit_basic_question_response(request):
     user = request.user
     progress, _ = OnboardingProgress.objects.get_or_create(user=user)
 
+    is_current_round = (
+        progress.current_stage == OnboardingStage.BASIC_QUESTION
+        and progress.current_round == round_no
+    )
+    is_past_round = (
+        progress.current_stage == OnboardingStage.BASIC_QUESTION
+        and round_no < progress.current_round
+    ) or progress.current_stage in (OnboardingStage.AB_SELECTION, OnboardingStage.MOODBOARD)
+
     if progress.current_stage == OnboardingStage.COMPLETED and round_no == 1:
         _start_retrain(progress)
-    elif (
-        progress.current_stage != OnboardingStage.BASIC_QUESTION
-        or progress.current_round != round_no
-    ):
+        is_current_round = True
+    elif not (is_current_round or is_past_round):
         return _validation_error("현재 진행 중인 라운드가 아닙니다.")
 
     response_obj, _ = BasicQuestionResponse.objects.update_or_create(
         user=user, round_no=round_no, defaults={"answer": answer}
     )
 
-    if round_no == 5:
-        progress.current_stage = OnboardingStage.AB_SELECTION
-        progress.current_round = 1
-    else:
-        progress.current_round += 1
-    progress.save()
+    if is_current_round:
+        if round_no == 5:
+            progress.current_stage = OnboardingStage.AB_SELECTION
+            progress.current_round = 1
+        else:
+            progress.current_round += 1
+        progress.save()
 
     return Response(BasicQuestionResponseSerializer(response_obj).data)
 
@@ -146,27 +155,39 @@ def submit_selection_photo(request):
     progress, _ = OnboardingProgress.objects.get_or_create(user=user)
 
     expected_round_no = _progress_round_no(progress)
-    if (
-        progress.current_stage not in (OnboardingStage.AB_SELECTION, OnboardingStage.MOODBOARD)
-        or round_no != expected_round_no
-    ):
+    if expected_round_no is None or round_no > expected_round_no:
         return _validation_error("현재 진행 중인 라운드가 아닙니다.")
 
-    photo_obj, _ = SelectionPhoto.objects.update_or_create(
+    photo_obj, created = SelectionPhoto.objects.update_or_create(
         user=user, round_no=round_no, photo_id=photo_id, defaults={"status": is_selected}
     )
 
-    total_expected, true_expected = _expected_counts(round_no)
-    round_photos = SelectionPhoto.objects.filter(user=user, round_no=round_no)
-    if round_photos.count() >= total_expected:
-        true_count = round_photos.filter(status=True).count()
-        if true_count != true_expected:
-            return _validation_error(
-                f"선택한 사진 수가 올바르지 않습니다 ({true_count}/{true_expected})."
-            )
-        _advance_progress(progress)
+    # 이미 존재하는 행(=지난 라운드에서 이미 제출된 사진)의 status만 덮어쓰는 경우엔 개수
+    # 정합성 재검증·라운드 전진을 건너뛴다. 검증을 매번 다시 돌리면, 이미 다 찬 라운드에서
+    # 선택을 바꾸려고 두 번 나눠 제출할 때 그 중간 상태가 일시적으로 정합성 조건을 깨서
+    # 정상적인 편집 흐름이 400으로 막힌다.
+    if created:
+        total_expected, true_expected = _expected_counts(round_no)
+        round_photos = SelectionPhoto.objects.filter(user=user, round_no=round_no)
+        if round_photos.count() >= total_expected:
+            true_count = round_photos.filter(status=True).count()
+            if true_count != true_expected:
+                return _validation_error(
+                    f"선택한 사진 수가 올바르지 않습니다 ({true_count}/{true_expected})."
+                )
+            if round_no == expected_round_no:
+                _advance_progress(progress)
 
     return Response(SelectionPhotoSerializer(photo_obj).data)
+
+
+@api_view(["GET"])
+@authentication_classes([JWTAccessAuthentication])
+@permission_classes([IsAuthenticated])
+def get_onboarding_progress(request):
+    user = request.user
+    progress, _ = OnboardingProgress.objects.get_or_create(user=user)
+    return Response(OnboardingProgressSerializer(progress).data)
 
 
 @api_view(["GET"])
