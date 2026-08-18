@@ -110,7 +110,10 @@ class PinPhotosInitialScoringTests(TestCase):
 
 
 class PinPhotosRegisterRejectionTests(TestCase):
-    """5.5 사진 등록의 반려 사유(MISSING_COORDINATES/OUT_OF_RADIUS/INVALID_FILE) 검증."""
+    """5.5 사진 등록의 반려 사유(INVALID_FILE/PHOTO_LIMIT_EXCEEDED) 검증.
+
+    좌표 없음/반경 초과는 더 이상 거절 사유가 아니다 — 위치 정보 없이도 즉시 촬영을
+    등록할 수 있어야 한다는 요구사항으로 2026-08-19 검증을 제거함."""
 
     def setUp(self):
         self.user = _make_user()
@@ -133,19 +136,28 @@ class PinPhotosRegisterRejectionTests(TestCase):
         )
         return pin_photos(request, self.pin.pin_id)
 
-    def test_missing_coordinates_is_rejected(self):
+    @patch("travel.views.resolve_and_consume")
+    def test_missing_coordinates_is_allowed(self, mock_resolve):
+        mock_resolve.return_value = "/uploads/file_1.jpg"
+
         response = self._post({})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["added"], [])
-        self.assertEqual(response.data["rejected"], [{"file_id": "file_1", "reason": "MISSING_COORDINATES"}])
+        self.assertEqual(response.data["rejected"], [])
+        self.assertEqual(len(response.data["added"]), 1)
+        photo = Photo.objects.get(pin=self.pin)
+        self.assertIsNone(photo.latitude)
+        self.assertIsNone(photo.longitude)
 
-    def test_out_of_radius_photo_is_rejected(self):
+    @patch("travel.views.resolve_and_consume")
+    def test_out_of_radius_photo_is_allowed(self, mock_resolve):
+        mock_resolve.return_value = "/uploads/file_1.jpg"
+
         response = self._post({"latitude": "38.5000", "longitude": "128.0000"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["added"], [])
-        self.assertEqual(response.data["rejected"], [{"file_id": "file_1", "reason": "OUT_OF_RADIUS"}])
+        self.assertEqual(response.data["rejected"], [])
+        self.assertEqual(len(response.data["added"]), 1)
 
     @patch("travel.views.resolve_and_consume")
     def test_invalid_file_is_rejected(self, mock_resolve):
