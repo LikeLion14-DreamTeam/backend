@@ -44,9 +44,8 @@ FILE_RESOLVE_EXCEPTIONS = (
 )
 PHOTO_RADIUS_LIMIT_KM = 1.0
 # 핀 하나에 사진이 너무 많으면 5.2.1/5.2.3 스코어링(사진마다 CV 분석)이 한 요청 안에서
-# 몰아서 실행돼 메모리 스파이크가 커진다 — 30장 기준 실측(EC2 t3.small)으로 안전 범위
-# 확인. (2026-08-19)
-MAX_PHOTOS_PER_PIN = 30
+# 몰아서 실행돼 메모리 스파이크가 커진다. (2026-08-19)
+MAX_PHOTOS_PER_PIN = 50
 DEFAULT_PAGE_LIMIT = 20
 MAX_PAGE_LIMIT = 100
 REPRESENTATIVE_PHOTO_MIN_COUNT = 4

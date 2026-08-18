@@ -161,7 +161,7 @@ class PinPhotosRegisterRejectionTests(TestCase):
         self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 0)
 
     def test_photo_limit_exceeded_when_pin_already_full(self):
-        for i in range(30):
+        for i in range(50):
             Photo.objects.create(
                 pin=self.pin,
                 captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
@@ -179,7 +179,7 @@ class PinPhotosRegisterRejectionTests(TestCase):
     @patch("travel.views.resolve_and_consume")
     def test_photo_limit_partially_rejects_batch_at_boundary(self, mock_resolve):
         mock_resolve.side_effect = lambda file_id, **kwargs: f"/uploads/{file_id}.jpg"
-        for i in range(28):
+        for i in range(48):
             Photo.objects.create(
                 pin=self.pin,
                 captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
@@ -204,7 +204,7 @@ class PinPhotosRegisterRejectionTests(TestCase):
                 {"file_id": "file_3", "reason": "PHOTO_LIMIT_EXCEEDED"},
             ],
         )
-        self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 30)
+        self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 50)
 
 
 class PinPhotosRefreshTests(TestCase):
