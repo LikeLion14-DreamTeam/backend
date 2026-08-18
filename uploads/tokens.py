@@ -1,12 +1,20 @@
 """
 uploads/tokens.py
 """
+import io
 import uuid
 
 import boto3
+import pillow_heif
 from botocore.exceptions import ClientError
 from django.conf import settings
 from django.core import signing
+from PIL import Image
+
+# OpenCV(cv2.imdecode)가 HEIC/HEIF를 디코딩 못 해 recommendations 스코어링이 그대로
+# 죽고(#102), 브라우저도 HEIC를 직접 렌더링 못 한다. 등록 시점(resolve_and_consume)에
+# JPEG로 변환해 저장하면 이후 스코어링·화면 표시 전부 일반 JPEG로 취급된다.
+pillow_heif.register_heif_opener()
 
 SALT = "uploads.file"
 MAX_AGE_SECONDS = 60 * 30  # 30분 — presigned URL 만료 시간
@@ -14,12 +22,15 @@ MAX_AGE_SECONDS = 60 * 30  # 30분 — presigned URL 만료 시간
 PENDING_PREFIX = "uploads/pending/"
 CONSUMED_PREFIX = "uploads/consumed/"
 
+HEIC_CONTENT_TYPES = {"image/heic", "image/heif"}
+
 _EXT_BY_CONTENT_TYPE = {
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
     "image/heic": ".heic",
+    "image/heif": ".heif",
     "audio/mpeg": ".mp3",
     "audio/mp4": ".m4a",
     "audio/x-m4a": ".m4a",
@@ -126,12 +137,27 @@ def resolve_and_consume(token, *, user, expected_file_type, max_age=MAX_AGE_SECO
         raise FileNotUploadedError("아직 업로드가 완료되지 않은 파일입니다.")
 
     filename = pending.rsplit("/", 1)[-1]
-    consumed_key = f"{CONSUMED_PREFIX}{filename}"
+    is_heic = payload["content_type"].lower() in HEIC_CONTENT_TYPES
+    if is_heic:
+        stem = filename.rsplit(".", 1)[0]
+        consumed_key = f"{CONSUMED_PREFIX}{stem}.jpg"
+    else:
+        consumed_key = f"{CONSUMED_PREFIX}{filename}"
 
     if _object_exists(s3, consumed_key):
         raise FileAlreadyConsumedError("이미 사용된 file_id입니다.")
 
-    s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": pending}, Key=consumed_key)
-    s3.delete_object(Bucket=bucket, Key=pending)
+    if is_heic:
+        pending_bytes = s3.get_object(Bucket=bucket, Key=pending)["Body"].read()
+        jpeg_buffer = io.BytesIO()
+        with Image.open(io.BytesIO(pending_bytes)) as image:
+            image.convert("RGB").save(jpeg_buffer, format="JPEG", quality=90)
+        s3.put_object(
+            Bucket=bucket, Key=consumed_key, Body=jpeg_buffer.getvalue(), ContentType="image/jpeg"
+        )
+        s3.delete_object(Bucket=bucket, Key=pending)
+    else:
+        s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": pending}, Key=consumed_key)
+        s3.delete_object(Bucket=bucket, Key=pending)
 
     return f"https://{bucket}.s3.{settings.AWS_REGION}.amazonaws.com/{consumed_key}"
