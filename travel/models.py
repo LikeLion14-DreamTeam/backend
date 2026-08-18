@@ -80,6 +80,16 @@ class Photo(models.Model):
     # 포토북(6.2)에서 쓰는 핀별 대표사진 선정은 이 필드가 아니라 photobooks.PhotobookPhotoLayout로 별도 관리한다.
     taste_rank = models.IntegerField(null=True, blank=True)
 
+    # taste.photo_measurement.measure_all_axes()의 실측값 캐시(0~100). 사진 고유의 객관적
+    # 속성이라 취향축이 바뀌어도 값이 안 바뀐다 — 재추천 때마다 매번 재계산하던 걸 없애기 위해
+    # 최초 스코어링 시점에 한 번 계산해서 저장하고, 이후로는 계속 재사용한다. 아직 계산 안 된
+    # 기존 사진은 null(백필 전까지). (#104)
+    measured_brightness = models.FloatField(null=True, blank=True)
+    measured_vividness = models.FloatField(null=True, blank=True)
+    measured_tone = models.FloatField(null=True, blank=True)
+    measured_density = models.FloatField(null=True, blank=True)
+    measured_photo_type = models.FloatField(null=True, blank=True)
+
     class Meta:
         db_table = "photo"
 
