@@ -1,6 +1,4 @@
 import logging
-from math import atan2, cos, radians, sin, sqrt
-
 
 from django.core import signing
 from django.db import transaction
@@ -42,7 +40,6 @@ FILE_RESOLVE_EXCEPTIONS = (
     ValueError,
     PermissionError,
 )
-PHOTO_RADIUS_LIMIT_KM = 1.0
 # 핀 하나에 사진이 너무 많으면 5.2.1/5.2.3 스코어링(사진마다 CV 분석)이 한 요청 안에서
 # 몰아서 실행돼 메모리 스파이크가 커진다. (2026-08-19)
 MAX_PHOTOS_PER_PIN = 50
@@ -83,14 +80,6 @@ def _voice_error_response(exc):
     else:
         message = str(exc) or "음성 파일을 확인할 수 없습니다."
     return Response({"message": message, "code": "VALIDATION_ERROR"}, status=status.HTTP_400_BAD_REQUEST)
-
-def _distance_km(lat1, lng1, lat2, lng2):
-    """두 좌표 사이 거리(km) — Haversine 공식"""
-    lat1, lng1, lat2, lng2 = (radians(float(v)) for v in (lat1, lng1, lat2, lng2))
-    dlat = lat2 - lat1
-    dlng = lng2 - lng1
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
-    return 6371.0 * 2 * atan2(sqrt(a), sqrt(1 - a))
 
 @api_view(["GET", "POST"])
 @authentication_classes([JWTAccessAuthentication])
@@ -915,16 +904,6 @@ def _pin_photos_register(request, pin):
         if existing_count + len(added) >= MAX_PHOTOS_PER_PIN:
             rejected.append({"file_id": file_id, "reason": "PHOTO_LIMIT_EXCEEDED"})
             continue
-
-        if latitude is None or longitude is None:
-            rejected.append({"file_id": file_id, "reason": "MISSING_COORDINATES"})
-            continue
-
-        if pin.latitude is not None and pin.longitude is not None:
-            distance = _distance_km(pin.latitude, pin.longitude, latitude, longitude)
-            if distance > PHOTO_RADIUS_LIMIT_KM:
-                rejected.append({"file_id": file_id, "reason": "OUT_OF_RADIUS"})
-                continue
 
         try:
             relative_url = resolve_and_consume(file_id, user=request.user, expected_file_type="photo")
