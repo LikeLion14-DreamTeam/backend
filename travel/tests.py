@@ -160,6 +160,52 @@ class PinPhotosRegisterRejectionTests(TestCase):
         self.assertEqual(response.data["rejected"], [{"file_id": "file_1", "reason": "INVALID_FILE"}])
         self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 0)
 
+    def test_photo_limit_exceeded_when_pin_already_full(self):
+        for i in range(30):
+            Photo.objects.create(
+                pin=self.pin,
+                captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+                photo_url=f"https://example.com/{i}.jpg",
+            )
+
+        response = self._post({"latitude": "37.5001", "longitude": "127.0001"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["added"], [])
+        self.assertEqual(
+            response.data["rejected"], [{"file_id": "file_1", "reason": "PHOTO_LIMIT_EXCEEDED"}]
+        )
+
+    @patch("travel.views.resolve_and_consume")
+    def test_photo_limit_partially_rejects_batch_at_boundary(self, mock_resolve):
+        mock_resolve.side_effect = lambda file_id, **kwargs: f"/uploads/{file_id}.jpg"
+        for i in range(28):
+            Photo.objects.create(
+                pin=self.pin,
+                captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+                photo_url=f"https://example.com/{i}.jpg",
+            )
+
+        photos = [
+            {"file_id": f"file_{i}", "captured_at": "2026-08-01T09:00:00Z", "latitude": "37.5001", "longitude": "127.0001"}
+            for i in range(4)
+        ]
+        request = self.factory.post(
+            f"/pins/{self.pin.pin_id}/photos", {"photos": photos}, format="json", **_auth_headers(self.user)
+        )
+        response = pin_photos(request, self.pin.pin_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["added"]), 2)
+        self.assertEqual(
+            response.data["rejected"],
+            [
+                {"file_id": "file_2", "reason": "PHOTO_LIMIT_EXCEEDED"},
+                {"file_id": "file_3", "reason": "PHOTO_LIMIT_EXCEEDED"},
+            ],
+        )
+        self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 30)
+
 
 class PinPhotosRefreshTests(TestCase):
     """5.6(대표사진 새로고침) 엔드포인트 검증 (#81)."""
