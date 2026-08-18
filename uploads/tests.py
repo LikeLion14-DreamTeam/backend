@@ -1,9 +1,14 @@
+import io
+from unittest.mock import MagicMock, patch
+
+from botocore.exceptions import ClientError
 from django.test import TestCase
+from PIL import Image
 from rest_framework_simplejwt.tokens import AccessToken
 
 from accounts.models import User
 
-from .tokens import verify_file_token
+from .tokens import issue_file_token, resolve_and_consume, verify_file_token
 
 
 def _make_user(**kwargs):
@@ -91,3 +96,60 @@ class RequestUploadViewTests(TestCase):
         )
 
         self.assertNotEqual(response1.json()["file_id"], response2.json()["file_id"])
+
+
+def _not_found_error(operation):
+    return ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, operation)
+
+
+def _fake_image_bytes():
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), color=(200, 50, 50)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class ResolveAndConsumeHeicConversionTests(TestCase):
+    """#102 — HEIC/HEIF 업로드는 resolve_and_consume에서 JPEG로 변환돼야 한다.
+
+    실제 HEIC 인코딩 여부는 테스트 환경(코덱 설치)에 따라 달라질 수 있어, 여기서는
+    PNG 바이트를 대신 써서 "content_type이 HEIC면 변환 경로를 탄다"는 분기 자체만
+    검증한다 — 실제 HEIC 디코딩 자체는 로컬에서 진짜 아이폰 HEIC 파일로 별도 확인함."""
+
+    def setUp(self):
+        self.user = User.objects.create(account_identifier="heic-test", email="heic@example.com")
+
+    @patch("uploads.tokens._s3_client")
+    def test_heic_content_type_is_converted_to_jpeg(self, mock_client_factory):
+        mock_s3 = MagicMock()
+        mock_client_factory.return_value = mock_s3
+        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "uploads/pending/abc123.heic"}]}
+        mock_s3.head_object.side_effect = _not_found_error("HeadObject")
+        mock_s3.get_object.return_value = {"Body": io.BytesIO(_fake_image_bytes())}
+
+        token, _uid = issue_file_token(self.user, "photo", "image/heic")
+        url = resolve_and_consume(token, user=self.user, expected_file_type="photo")
+
+        self.assertTrue(url.endswith(".jpg"))
+        mock_s3.copy_object.assert_not_called()
+        mock_s3.put_object.assert_called_once()
+        put_kwargs = mock_s3.put_object.call_args.kwargs
+        self.assertEqual(put_kwargs["Key"], "uploads/consumed/abc123.jpg")
+        self.assertEqual(put_kwargs["ContentType"], "image/jpeg")
+        mock_s3.delete_object.assert_called_once_with(
+            Bucket=mock_s3.put_object.call_args.kwargs["Bucket"], Key="uploads/pending/abc123.heic"
+        )
+
+    @patch("uploads.tokens._s3_client")
+    def test_non_heic_content_type_still_uses_fast_copy_path(self, mock_client_factory):
+        mock_s3 = MagicMock()
+        mock_client_factory.return_value = mock_s3
+        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "uploads/pending/xyz789.jpg"}]}
+        mock_s3.head_object.side_effect = _not_found_error("HeadObject")
+
+        token, _uid = issue_file_token(self.user, "photo", "image/jpeg")
+        url = resolve_and_consume(token, user=self.user, expected_file_type="photo")
+
+        self.assertTrue(url.endswith("xyz789.jpg"))
+        mock_s3.put_object.assert_not_called()
+        mock_s3.get_object.assert_not_called()
+        mock_s3.copy_object.assert_called_once()
