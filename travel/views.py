@@ -17,7 +17,7 @@ from photobooks.services import (
     recompute_photobook_city,
 )
 from products.models import NfcTag
-from recommendations.travel_adapter import rank_pin_photos, refresh_pin_photos
+from recommendations.travel_adapter import precompute_measured_axes, rank_pin_photos, refresh_pin_photos
 from uploads.tokens import FileAlreadyConsumedError, FileNotUploadedError, resolve_and_consume
 
 from .country_codes import resolve_country_code
@@ -43,6 +43,10 @@ FILE_RESOLVE_EXCEPTIONS = (
 # 핀 하나에 사진이 너무 많으면 5.2.1/5.2.3 스코어링(사진마다 CV 분석)이 한 요청 안에서
 # 몰아서 실행돼 메모리 스파이크가 커진다. (2026-08-19)
 MAX_PHOTOS_PER_PIN = 50
+# 사진 등록 시점에 실측값을 eager 계산(#110)하기 때문에, 한 요청에 너무 많은 사진이 오면
+# 그 계산 자체가 오래 걸려 클라이언트 타임아웃 위험이 생긴다. 요청당 15장으로 제한하고
+# 초과분은 PHOTO_LIMIT_EXCEEDED와 같은 부분 거절 방식으로 처리한다. (2026-08-19)
+MAX_PHOTOS_PER_REQUEST = 15
 DEFAULT_PAGE_LIMIT = 20
 MAX_PAGE_LIMIT = 100
 REPRESENTATIVE_PHOTO_MIN_COUNT = 4
@@ -895,11 +899,16 @@ def _pin_photos_register(request, pin):
     existing_count = Photo.objects.filter(pin=pin).count()
 
     added = []
+    added_photos = []
     rejected = []
     for item in photos_data:
         file_id = item["file_id"]
         latitude = item.get("latitude")
         longitude = item.get("longitude")
+
+        if len(added) >= MAX_PHOTOS_PER_REQUEST:
+            rejected.append({"file_id": file_id, "reason": "BATCH_SIZE_EXCEEDED"})
+            continue
 
         if existing_count + len(added) >= MAX_PHOTOS_PER_PIN:
             rejected.append({"file_id": file_id, "reason": "PHOTO_LIMIT_EXCEEDED"})
@@ -920,11 +929,19 @@ def _pin_photos_register(request, pin):
             photo_url=request.build_absolute_uri(relative_url),
         )
         added.append({"photo_id": photo.photo_id, "file_id": file_id})
+        added_photos.append(photo)
 
     if added and not already_scored:
         # 5.2.1 최초 추천 — 이 핀이 처음 스코어링되는 시점. 온보딩 미완료(취향 축 없음)
-        # 유저는 rank_pin_photos 내부에서 이미 no-op 처리된다.
+        # 유저는 rank_pin_photos 내부에서 이미 no-op 처리된다. rank_pin_photos가 핀의 사진
+        # 전체(새로 추가된 것 포함)를 다운로드하며 measured_* 캐싱도 같이 해주므로 아래
+        # precompute_measured_axes는 따로 호출하지 않는다.
         rank_pin_photos(pin)
+    elif added:
+        # 이미 스코어링된 핀에 사진이 추가되는 경우 — taste_rank는 5.6(새로고침)에서만
+        # 갱신하므로 여기선 건드리지 않고, 새로 추가된 사진의 실측값만 미리 계산해 캐싱해둔다
+        # (#110) — 나중에 새로고침이 몰아서 계산하지 않도록.
+        precompute_measured_axes(added_photos)
 
     if added and is_finished_trip_pin:
         # 종료된 여정(포토북 이미 생성됨)의 핀에 사진이 새로 추가된 경우 — 그 핀의 포토북

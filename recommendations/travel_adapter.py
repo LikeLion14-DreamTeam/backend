@@ -106,6 +106,32 @@ def _score_and_save(pin, rank_func):
     Photo.objects.bulk_update(photos, ["taste_rank"] + _MEASURED_FIELDS)
 
 
+def precompute_measured_axes(photos):
+    """사진 등록(5.5) 시점에 취향축 실측값을 미리 계산해 캐싱해둔다 (#110).
+
+    이미 스코어링된 핀(already_scored)에 사진이 추가될 때는 rank_pin_photos가 호출되지
+    않는다(재계산은 5.6 새로고침에서만) — 그래서 새로 추가된 사진의 measured_*는 등록만으론
+    안 채워진 채로 남는다. 나중에 새로고침을 호출할 때 그 누적분이 한꺼번에 계산되면 응답이
+    느려지므로(사진이 많이 쌓인 뒤 첫 새로고침), 등록 시점에 한 장씩 미리 계산해 채워 둔다.
+
+    다운로드/디코딩 실패한 사진은 건너뛴다 — 다음에 스코어링될 때(rank/refresh) 다시 시도된다.
+    """
+    to_update = []
+    for photo in photos:
+        try:
+            image = _download_image(photo.photo_url)
+        except (ValueError, requests.exceptions.RequestException) as exc:
+            logger.warning(
+                "사진 등록 시점 실측값 계산 실패, 건너뜀: photo_id=%s url=%s error=%s",
+                photo.photo_id, photo.photo_url, exc,
+            )
+            continue
+        _get_or_compute_measured_axes(photo, image)
+        to_update.append(photo)
+    if to_update:
+        Photo.objects.bulk_update(to_update, _MEASURED_FIELDS)
+
+
 def rank_pin_photos(pin):
     """5.2.1 최초 추천 — 핀 생성 시점에 있는 사진 전체에 순위를 매겨 Photo.taste_rank에 저장한다.
     유사 사진은 대표 1장만 상위 순위 경쟁에 참여한다(scoring.rank_all_photos 참고)."""
