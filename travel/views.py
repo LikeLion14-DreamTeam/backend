@@ -43,6 +43,9 @@ FILE_RESOLVE_EXCEPTIONS = (
     PermissionError,
 )
 PHOTO_RADIUS_LIMIT_KM = 1.0
+# 핀 하나에 사진이 너무 많으면 5.2.1/5.2.3 스코어링(사진마다 CV 분석)이 한 요청 안에서
+# 몰아서 실행돼 메모리 스파이크가 커진다. (2026-08-19)
+MAX_PHOTOS_PER_PIN = 50
 DEFAULT_PAGE_LIMIT = 20
 MAX_PAGE_LIMIT = 100
 REPRESENTATIVE_PHOTO_MIN_COUNT = 4
@@ -900,12 +903,18 @@ def _pin_photos_register(request, pin):
     serializer.is_valid(raise_exception=True)
     photos_data = serializer.validated_data["photos"]
 
+    existing_count = Photo.objects.filter(pin=pin).count()
+
     added = []
     rejected = []
     for item in photos_data:
         file_id = item["file_id"]
         latitude = item.get("latitude")
         longitude = item.get("longitude")
+
+        if existing_count + len(added) >= MAX_PHOTOS_PER_PIN:
+            rejected.append({"file_id": file_id, "reason": "PHOTO_LIMIT_EXCEEDED"})
+            continue
 
         if latitude is None or longitude is None:
             rejected.append({"file_id": file_id, "reason": "MISSING_COORDINATES"})

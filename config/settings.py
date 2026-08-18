@@ -30,7 +30,12 @@ SECRET_KEY = get_secret("SECRET_KEY")
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# secrets.json에 "DEBUG": false를 명시한 환경(배포 서버)에서만 끈다. 로컬 개발 환경은
+# secrets.json에 이 키가 없으면 그대로 True로 동작해 기존 개발 경험을 안 건드린다.
+# DEBUG=True인 채로 인터넷에 열려 있으면 에러 발생 시 상세 스택트레이스(코드·설정값·로컬
+# 변수)가 접속자 누구에게나 노출된다 — 배포 서버가 Cloudflare 터널로 전 세계에 열려 있어
+# 실질적 위험이 있다고 판단해 끈다. (2026-08-19)
+DEBUG = secrets.get("DEBUG", True)
 
 ALLOWED_HOSTS = ['52.79.135.193', 'localhost', '127.0.0.1', '.trycloudflare.com']
 
