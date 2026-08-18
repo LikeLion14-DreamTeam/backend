@@ -338,3 +338,31 @@ class TravelAdapterTests(TestCase):
 
         ranks = list(Photo.objects.filter(pin=self.pin).values_list("taste_rank", flat=True))
         self.assertEqual(sorted(ranks), [1, 2, 3, 4, 5])
+
+    @patch("recommendations.travel_adapter._download_image")
+    def test_undecodable_photo_is_skipped_instead_of_crashing(self, mock_download):
+        """#102 후속 — HEIC 말고도 다운로드/디코딩 실패하는 사진(손상된 파일, 미지원
+        포맷 등)이 하나 있어도 핀 전체 스코어링이 죽지 않고, 그 사진만 제외한 채
+        나머지 사진들은 정상적으로 순위가 매겨져야 한다."""
+
+        def fake_download(url):
+            if url == "bad":
+                raise ValueError("이미지를 디코딩할 수 없습니다: bad")
+            return _load(int(url))
+
+        mock_download.side_effect = fake_download
+        _set_taste_axes(self.user)
+        base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
+        good_photo_1 = self._create_photo(1001, base_time)
+        bad_photo = Photo.objects.create(pin=self.pin, captured_at=base_time + datetime.timedelta(hours=1), photo_url="bad")
+        good_photo_2 = self._create_photo(2001, base_time + datetime.timedelta(hours=2))
+
+        rank_pin_photos(self.pin)
+
+        good_photo_1.refresh_from_db()
+        bad_photo.refresh_from_db()
+        good_photo_2.refresh_from_db()
+        self.assertIsNone(bad_photo.taste_rank)
+        self.assertIsNotNone(good_photo_1.taste_rank)
+        self.assertIsNotNone(good_photo_2.taste_rank)
+        self.assertEqual({good_photo_1.taste_rank, good_photo_2.taste_rank}, {1, 2})

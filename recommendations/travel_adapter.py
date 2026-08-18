@@ -6,6 +6,8 @@ GET), 취향 프로파일 조회(taste 앱), 스코어링(scoring.py), 결과 �
 전부 이 안에서 처리한다.
 """
 
+import logging
+
 import cv2
 import numpy as np
 import requests
@@ -14,6 +16,8 @@ from taste.models import TasteProfileAxis
 from travel.models import Photo
 
 from .scoring import rank_all_photos, rank_all_photos_for_refresh
+
+logger = logging.getLogger("request_logger")
 
 
 def _download_image(photo_url):
@@ -31,7 +35,22 @@ def _get_taste_axes(user):
 
 
 def _to_scoring_photos(photos):
-    return [(photo.photo_id, _download_image(photo.photo_url), photo.captured_at) for photo in photos]
+    """사진을 (photo_id, image, captured_at) 형태로 내려받는다. 한 장이라도 다운로드/디코딩에
+    실패하면(지원 안 하는 포맷, 손상된 파일, 일시적 네트워크 오류 등) 그 사진만 건너뛰고
+    나머지로 계속 진행한다 — 예전에는 이 실패가 그대로 전파돼 핀 전체 스코어링이 500으로
+    죽었다."""
+    result = []
+    for photo in photos:
+        try:
+            image = _download_image(photo.photo_url)
+        except (ValueError, requests.exceptions.RequestException) as exc:
+            logger.warning(
+                "사진 다운로드/디코딩 실패, 스코어링에서 제외: photo_id=%s url=%s error=%s",
+                photo.photo_id, photo.photo_url, exc,
+            )
+            continue
+        result.append((photo.photo_id, image, photo.captured_at))
+    return result
 
 
 def _score_and_save(pin, rank_func):
