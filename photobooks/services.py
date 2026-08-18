@@ -96,7 +96,8 @@ def build_photobook_pins(photobook):
 
     for city_pins in cities.values():
         order = 0
-        for pin in _select_pins_for_city(city_pins):
+        selected_pins = sorted(_select_pins_for_city(city_pins), key=lambda p: p.tagged_at)
+        for pin in selected_pins:
             order += 1
             photobook_pin = PhotobookPin.objects.create(photobook=photobook, pin=pin, order=order)
             _write_photo_layout(photobook_pin, pin)
@@ -120,7 +121,8 @@ def recompute_photobook_city(photobook, city):
     PhotobookPin.objects.filter(photobook=photobook, pin__city=city).delete()
 
     order = 0
-    for pin in _select_pins_for_city(pins):
+    selected_pins = sorted(_select_pins_for_city(pins), key=lambda p: p.tagged_at)
+    for pin in selected_pins:
         order += 1
         photobook_pin = PhotobookPin.objects.create(photobook=photobook, pin=pin, order=order)
         _write_photo_layout(photobook_pin, pin)
