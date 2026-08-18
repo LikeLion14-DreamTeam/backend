@@ -6,10 +6,11 @@ Pin/Photo API(5.5 사진 등록, 5.6 대표사진 새로고침, 5.7 사진 삭�
 호출하는 구조다.
 
 ⚠️ 설계 초안: travel의 Photo 모델이 아직 develop에 머지되지 않아, 아래 함수들은 travel.models를
-import하지 않고 최소한의 인풋만 받도록 설계했다 — 각 사진은 `(photo_id, image, captured_at)`
-튜플로 표현한다(`image`는 taste/photo_measurement.py와 동일하게 cv2 BGR numpy 배열). 실제
-travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드해 이 형태로 변환해서 넘기면
-된다 — 이미지를 어떻게 읽어오는지(로컬/S3)는 이 모듈이 신경 쓰지 않는다.
+import하지 않고 최소한의 인풋만 받도록 설계했다 — 각 사진은 `(photo_id, image, captured_at,
+measured_axes)` 튜플로 표현한다(`image`는 taste/photo_measurement.py와 동일하게 cv2 BGR
+numpy 배열, `measured_axes`는 이미 계산된 축 값 dict 또는 아직 없으면 None). 실제 travel 연동
+시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드해 이 형태로 변환해서 넘기면 된다 —
+이미지를 어떻게 읽어오는지(로컬/S3)는 이 모듈이 신경 쓰지 않는다.
 
 ## 알고리즘 (기능명세서 5.2.1 / 5.2.3 기준)
 
@@ -17,9 +18,12 @@ travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드
    가깝고(`TIME_PROXIMITY_SECONDS` 이내) + perceptual hash(pHash) 해밍 거리가 가까운
    (`HAMMING_THRESHOLD` 이하) 사진들을 하나로 묶어 대표 1장만 남긴다 (2026-08-16(#94)부터
    CLIP 임베딩+코사인유사도 대신 pHash 사용 — docs/IMPLEMENTATION.md 참고).
-2. 스코어링(`score_photo`) — `taste.photo_measurement.measure_all_axes()`로 사진의 5개 축
-   실측값을 구하고, 유저의 `TasteProfileAxis` 값과 축별 절댓값 차이의 평균을 100에서 뺀 값을
-   점수로 쓴다(차이가 작을수록 = 취향에 가까울수록 높은 점수).
+2. 스코어링(`score_photo`) — 사진의 5개 축 실측값(`measured_axes`)과 유저의 `TasteProfileAxis`
+   값의 축별 절댓값 차이의 평균을 100에서 뺀 값을 점수로 쓴다(차이가 작을수록 = 취향에
+   가까울수록 높은 점수). 실측값 자체는 이 모듈이 계산하지 않는다 — 이미 계산돼 있으면
+   (`measured_axes`가 not None) 그대로 쓰고, 없으면 호출부가 `measure_all_axes`로 계산해서
+   넘겨줘야 한다(2026-08-19, #104 — 재추천마다 반복 계산되던 걸 캐싱하기 위해 계산 책임을
+   travel_adapter로 옮김 — 아래 "실측값 캐싱" 참고).
 3. 최초 추천(`select_initial_recommendations`, 5.2.1) — 유사 사진 축소 → 스코어링 → 상위
    3장(3장 미만이면 있는 대로).
 4. 재추천(`select_refreshed_recommendations`, 5.2.3) — **5.2.1과 동일하게 유사 사진 축소를
@@ -32,6 +36,20 @@ travel 연동 시, 호출부(travel 뷰)에서 `Photo.photo_url`을 다운로드
    최상위를 차지해 대표사진들이 사실상 같은 사진이 되는 문제를 막기 위함, 2026-08-15 확인),
    그룹에서 제외된 "중복" 사진들은 각자 개별 점수로 다시 정렬해 대표 사진들 뒤에 순위를
    이어붙인다. 그래서 상위 순위는 항상 서로 다른 사진이고, 그래도 핀의 모든 사진이 순위를 받는다.
+
+## 실측값 캐싱 (#104, 2026-08-19)
+
+사진의 실측값(밝기/채도/톤/구도밀도/인물여부)은 사진 고유의 객관적 속성이라 취향축이
+바뀌어도 절대 안 바뀐다. 예전엔 `score_photo`가 호출될 때마다(그것도 한 사진당 여러 번 —
+`_rank_for_refresh`에서 전체 정렬 + 선정된 3장 재정렬로 최소 2번) `measure_all_axes`를
+새로 돌렸는데, 이게 재추천이 느리고(사진 30장 기준 실측 최대 34초+) 메모리 부담이 큰
+핵심 원인이었다(OOM 크래시 사례 있음).
+
+그래서 이 모듈은 이제 실측값을 "계산"하지 않고 "받기만" 한다 — 각 사진 튜플의 4번째
+요소(`measured_axes`)에 값이 있으면 그대로 쓰고, 없으면(`None`) 호출부(travel_adapter)가
+그 자리에서 계산해서 다시 캐싱해두는 책임을 진다. `reduce_similar_photos`(pHash 유사사진
+판별)는 원래도 가벼운 연산(30장 기준 ~1초)이라 이번 캐싱 대상에서 제외했다 — `image`는
+그 용도로만 계속 필요하다.
 
 ## 언제 호출하는지 (travel과 확인된 사항, 2026-08-15)
 - **핀 생성 시점**: 그때 있는 사진 전체를 스코어링(최초 추천).
@@ -69,18 +87,19 @@ REFRESH_RECOMMENDATION_COUNT = 3
 
 
 def reduce_similar_photos(photos):
-    """(photo_id, image, captured_at) 리스트를 촬영 시각 근접 + 이미지 유사도(pHash)로 줄인다."""
+    """(photo_id, image, captured_at, measured_axes) 리스트를 촬영 시각 근접 + 이미지
+    유사도(pHash)로 줄인다. measured_axes는 이 함수와 무관 — 그대로 유지해서 반환한다."""
     if len(photos) <= 1:
         return list(photos)
 
     sorted_photos = sorted(photos, key=lambda p: p[2])
-    hashes = {photo_id: compute_phash(image) for photo_id, image, _ in sorted_photos}
+    hashes = {photo_id: compute_phash(image) for photo_id, image, _captured_at, _measured in sorted_photos}
 
     kept = []
     for photo in sorted_photos:
-        photo_id, _image, captured_at = photo
+        photo_id, _image, captured_at, _measured = photo
         is_duplicate = False
-        for kept_id, _kept_image, kept_captured_at in kept:
+        for kept_id, _kept_image, kept_captured_at, _kept_measured in kept:
             time_close = abs((captured_at - kept_captured_at).total_seconds()) <= TIME_PROXIMITY_SECONDS
             if time_close and hamming_distance(hashes[photo_id], hashes[kept_id]) <= HAMMING_THRESHOLD:
                 is_duplicate = True
@@ -90,18 +109,30 @@ def reduce_similar_photos(photos):
     return kept
 
 
-def score_photo(image, taste_axes):
-    """taste_axes: {axis_code: value(0~100)}. 값이 클수록 취향에 가깝다."""
-    measured = measure_all_axes(image)
-    diffs = [abs(measured[axis] - taste_axes[axis]) for axis in taste_axes]
+def score_photo(measured_axes, taste_axes):
+    """measured_axes/taste_axes: {axis_code: value(0~100)}. 값이 클수록 취향에 가깝다.
+    실측값 계산(measure_all_axes)은 이 함수의 책임이 아니다 — 이미 계산된 값을 받기만 한다
+    (#104, 캐싱을 위해 계산 책임을 호출부로 이동)."""
+    diffs = [abs(measured_axes[axis] - taste_axes[axis]) for axis in taste_axes]
     return 100 - (sum(diffs) / len(diffs))
+
+
+def _resolve_measured(photos):
+    """photo_id -> measured_axes 매핑을 만든다. 이미 계산돼 있으면(measured_axes가 not None)
+    그대로 쓰고, 없으면 이 자리에서 measure_all_axes로 계산한다(캐시 미스 — 최초 스코어링
+    시점이거나, 백필 전 기존 사진)."""
+    return {
+        photo_id: measured if measured is not None else measure_all_axes(image)
+        for photo_id, image, _captured_at, measured in photos
+    }
 
 
 def select_initial_recommendations(photos, taste_axes):
     """5.2.1 최초 추천. 상위 3장(부족하면 있는 대로)의 photo_id를 점수 높은 순으로 반환."""
     reduced = reduce_similar_photos(photos)
-    scored = sorted(reduced, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
-    return [photo_id for photo_id, _image, _captured_at in scored[:INITIAL_RECOMMENDATION_COUNT]]
+    measured_by_id = _resolve_measured(reduced)
+    scored = sorted(reduced, key=lambda p: score_photo(measured_by_id[p[0]], taste_axes), reverse=True)
+    return [photo_id for photo_id, _image, _captured_at, _measured in scored[:INITIAL_RECOMMENDATION_COUNT]]
 
 
 def rank_all_photos(photos, taste_axes):
@@ -112,29 +143,37 @@ def rank_all_photos(photos, taste_axes):
     if not photos:
         return []
 
+    measured_by_id = _resolve_measured(photos)
+
     primary = reduce_similar_photos(photos)
-    primary_ids = {photo_id for photo_id, _image, _captured_at in primary}
+    primary_ids = {photo_id for photo_id, _image, _captured_at, _measured in primary}
     duplicates = [p for p in photos if p[0] not in primary_ids]
 
-    ranked_primary = sorted(primary, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
-    ranked_duplicates = sorted(duplicates, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+    ranked_primary = sorted(primary, key=lambda p: score_photo(measured_by_id[p[0]], taste_axes), reverse=True)
+    ranked_duplicates = sorted(
+        duplicates, key=lambda p: score_photo(measured_by_id[p[0]], taste_axes), reverse=True
+    )
 
     ordered = ranked_primary + ranked_duplicates
-    return [(photo_id, rank) for rank, (photo_id, _image, _captured_at) in enumerate(ordered, start=1)]
+    return [(photo_id, rank) for rank, (photo_id, _image, _captured_at, _measured) in enumerate(ordered, start=1)]
 
 
 def _rank_for_refresh(photos, taste_axes, rng=None):
     """5.2.3 재추천의 공통 순서 계산. 유사 사진 그룹은 대표 1장만 상위 10장 후보 풀에
     넣어(무작위 3장이 비슷한 사진끼리 몰리지 않도록) 그중 3장을 무작위 선정해 맨 앞에 두고,
-    선정 안 된 대표 사진 → 중복 사진 순으로 이어붙인 전체 (photo_id, image, captured_at)
-    리스트를 반환한다."""
+    선정 안 된 대표 사진 → 중복 사진 순으로 이어붙인 전체 (photo_id, image, captured_at,
+    measured_axes) 리스트를 반환한다."""
     rng = rng or random
+    measured_by_id = _resolve_measured(photos)
+
+    def score(p):
+        return score_photo(measured_by_id[p[0]], taste_axes)
 
     primary = reduce_similar_photos(photos)
-    primary_ids = {photo_id for photo_id, _image, _captured_at in primary}
+    primary_ids = {photo_id for photo_id, _image, _captured_at, _measured in primary}
     duplicates = [p for p in photos if p[0] not in primary_ids]
 
-    scored_primary = sorted(primary, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+    scored_primary = sorted(primary, key=score, reverse=True)
     candidate_pool = scored_primary[:REFRESH_CANDIDATE_POOL_SIZE]
 
     if len(candidate_pool) <= REFRESH_RECOMMENDATION_COUNT:
@@ -142,10 +181,10 @@ def _rank_for_refresh(photos, taste_axes, rng=None):
     else:
         selected = rng.sample(candidate_pool, REFRESH_RECOMMENDATION_COUNT)
 
-    selected_ids = {photo_id for photo_id, _image, _captured_at in selected}
-    selected_sorted = sorted(selected, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+    selected_ids = {photo_id for photo_id, _image, _captured_at, _measured in selected}
+    selected_sorted = sorted(selected, key=score, reverse=True)
     remaining_primary = [p for p in scored_primary if p[0] not in selected_ids]
-    scored_duplicates = sorted(duplicates, key=lambda p: score_photo(p[1], taste_axes), reverse=True)
+    scored_duplicates = sorted(duplicates, key=score, reverse=True)
 
     return selected_sorted + remaining_primary + scored_duplicates
 
@@ -154,7 +193,7 @@ def select_refreshed_recommendations(photos, taste_axes, rng=None):
     """5.2.3 재추천. 유사 사진 축소 후 상위 10장 후보 중 3장을 무작위 선정해 photo_id로 반환한다
     (후보가 정확히 3장이면 무작위 없이 그대로)."""
     ordered = _rank_for_refresh(photos, taste_axes, rng)
-    return [photo_id for photo_id, _image, _captured_at in ordered[:REFRESH_RECOMMENDATION_COUNT]]
+    return [photo_id for photo_id, _image, _captured_at, _measured in ordered[:REFRESH_RECOMMENDATION_COUNT]]
 
 
 def rank_all_photos_for_refresh(photos, taste_axes, rng=None):
@@ -163,4 +202,4 @@ def rank_all_photos_for_refresh(photos, taste_axes, rng=None):
     if not photos:
         return []
     ordered = _rank_for_refresh(photos, taste_axes, rng)
-    return [(photo_id, rank) for rank, (photo_id, _image, _captured_at) in enumerate(ordered, start=1)]
+    return [(photo_id, rank) for rank, (photo_id, _image, _captured_at, _measured) in enumerate(ordered, start=1)]

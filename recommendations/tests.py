@@ -7,7 +7,7 @@ from django.test import SimpleTestCase, TestCase
 
 from accounts.models import User
 from taste.models import TasteProfileAxis
-from taste.photo_measurement import load_image
+from taste.photo_measurement import load_image, measure_all_axes
 from travel.models import Photo, Pin
 
 from .scoring import (
@@ -31,15 +31,15 @@ def _load(photo_id):
 
 class ReduceSimilarPhotosTests(SimpleTestCase):
     def test_single_photo_returned_as_is(self):
-        photo = (1001, _load(1001), datetime.datetime(2026, 8, 1, 9, 0))
+        photo = (1001, _load(1001), datetime.datetime(2026, 8, 1, 9, 0), None)
         self.assertEqual(reduce_similar_photos([photo]), [photo])
 
     def test_same_image_close_in_time_is_deduplicated(self):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         image = _load(1001)
         photos = [
-            (1, image, base_time),
-            (2, image, base_time + datetime.timedelta(seconds=10)),
+            (1, image, base_time, None),
+            (2, image, base_time + datetime.timedelta(seconds=10), None),
         ]
         reduced = reduce_similar_photos(photos)
         self.assertEqual(len(reduced), 1)
@@ -48,8 +48,8 @@ class ReduceSimilarPhotosTests(SimpleTestCase):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         image = _load(1001)
         photos = [
-            (1, image, base_time),
-            (2, image, base_time + datetime.timedelta(hours=3)),
+            (1, image, base_time, None),
+            (2, image, base_time + datetime.timedelta(hours=3), None),
         ]
         reduced = reduce_similar_photos(photos)
         self.assertEqual(len(reduced), 2)
@@ -57,8 +57,8 @@ class ReduceSimilarPhotosTests(SimpleTestCase):
     def test_visually_different_photos_close_in_time_are_not_deduplicated(self):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         photos = [
-            (1001, _load(1001), base_time),
-            (2001, _load(2001), base_time + datetime.timedelta(seconds=5)),
+            (1001, _load(1001), base_time, None),
+            (2001, _load(2001), base_time + datetime.timedelta(seconds=5), None),
         ]
         reduced = reduce_similar_photos(photos)
         self.assertEqual(len(reduced), 2)
@@ -69,27 +69,21 @@ class ScorePhotoTests(SimpleTestCase):
         taste_axes = {
             "brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50,
         }
-        score = score_photo(_load(1001), taste_axes)
+        score = score_photo(measure_all_axes(_load(1001)), taste_axes)
         self.assertIsInstance(score, float)
         self.assertGreaterEqual(score, 0)
         self.assertLessEqual(score, 100)
 
-    @patch("recommendations.scoring.measure_all_axes")
-    def test_closer_match_scores_higher(self, mock_measure):
-        # 실제 카탈로그 사진은 brightness 검증용으로 고른 것이라 다른 축(밀도 등)이 통제돼
-        # 있지 않다 — 측정값을 직접 모킹해서 "brightness만 다르면 더 가까운 쪽이 더 높은
-        # 점수를 받는다"는 스코어링 공식 자체만 격리해서 검증한다.
+    def test_closer_match_scores_higher(self):
+        # score_photo는 이제 이미 계산된 measured_axes를 받기만 하므로(#104), 측정값을
+        # 직접 만들어서 "brightness만 다르면 더 가까운 쪽이 더 높은 점수를 받는다"는
+        # 스코어링 공식 자체만 격리해서 검증한다.
         taste_axes = {
             "brightness": 90, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50,
         }
 
-        def fake_measure(image):
-            return {**taste_axes, "brightness": image}  # image 인자를 밝기값 자리표시자로 사용
-
-        mock_measure.side_effect = fake_measure
-
-        bright_score = score_photo(85, taste_axes)  # 90에 더 가까움
-        dark_score = score_photo(20, taste_axes)  # 90에서 더 멂
+        bright_score = score_photo({**taste_axes, "brightness": 85}, taste_axes)  # 90에 더 가까움
+        dark_score = score_photo({**taste_axes, "brightness": 20}, taste_axes)  # 90에서 더 멂
         self.assertGreater(bright_score, dark_score)
 
 
@@ -97,7 +91,7 @@ class SelectInitialRecommendationsTests(SimpleTestCase):
     def test_returns_at_most_three(self):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         photos = [
-            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i))
+            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i), None)
             for i, photo_id in enumerate([1001, 2001, 3001, 4001, 5001])
         ]
         taste_axes = {"brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
@@ -106,7 +100,7 @@ class SelectInitialRecommendationsTests(SimpleTestCase):
 
     def test_fewer_than_three_returns_all(self):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
-        photos = [(1001, _load(1001), base_time)]
+        photos = [(1001, _load(1001), base_time, None)]
         taste_axes = {"brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
         result = select_initial_recommendations(photos, taste_axes)
         self.assertEqual(len(result), 1)
@@ -119,13 +113,13 @@ class SelectInitialRecommendationsTests(SimpleTestCase):
     def test_result_is_ordered_by_score_descending(self):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         photos = [
-            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i))
+            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i), None)
             for i, photo_id in enumerate([1001, 1002, 2001, 2002])
         ]
         taste_axes = {"brightness": 90, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
         result = select_initial_recommendations(photos, taste_axes)
         photo_by_id = {p[0]: p[1] for p in photos}
-        scores = [score_photo(photo_by_id[photo_id], taste_axes) for photo_id in result]
+        scores = [score_photo(measure_all_axes(photo_by_id[photo_id]), taste_axes) for photo_id in result]
         self.assertEqual(scores, sorted(scores, reverse=True))
 
 
@@ -133,7 +127,7 @@ class SelectRefreshedRecommendationsTests(SimpleTestCase):
     def _photos(self, photo_ids):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         return [
-            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i))
+            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i), None)
             for i, photo_id in enumerate(photo_ids)
         ]
 
@@ -166,13 +160,13 @@ class SelectRefreshedRecommendationsTests(SimpleTestCase):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         image = _load(1001)
         duplicates = [
-            (1, image, base_time),
-            (2, image, base_time + datetime.timedelta(seconds=5)),
-            (3, image, base_time + datetime.timedelta(seconds=10)),
+            (1, image, base_time, None),
+            (2, image, base_time + datetime.timedelta(seconds=5), None),
+            (3, image, base_time + datetime.timedelta(seconds=10), None),
         ]
         distinct_photos = [
-            (2001, _load(2001), base_time + datetime.timedelta(hours=1)),
-            (3001, _load(1002), base_time + datetime.timedelta(hours=2)),
+            (2001, _load(2001), base_time + datetime.timedelta(hours=1), None),
+            (3001, _load(1002), base_time + datetime.timedelta(hours=2), None),
         ]
         photos = duplicates + distinct_photos
         taste_axes = {"brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
@@ -185,7 +179,7 @@ class RankAllPhotosForRefreshTests(SimpleTestCase):
     def _photos(self, photo_ids):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         return [
-            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i))
+            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i), None)
             for i, photo_id in enumerate(photo_ids)
         ]
 
@@ -212,13 +206,13 @@ class RankAllPhotosForRefreshTests(SimpleTestCase):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         image = _load(1001)
         duplicates = [
-            (1, image, base_time),
-            (2, image, base_time + datetime.timedelta(seconds=5)),
-            (3, image, base_time + datetime.timedelta(seconds=10)),
+            (1, image, base_time, None),
+            (2, image, base_time + datetime.timedelta(seconds=5), None),
+            (3, image, base_time + datetime.timedelta(seconds=10), None),
         ]
         distinct_photos = [
-            (2001, _load(2001), base_time + datetime.timedelta(hours=1)),
-            (3001, _load(3001), base_time + datetime.timedelta(hours=2)),
+            (2001, _load(2001), base_time + datetime.timedelta(hours=1), None),
+            (3001, _load(3001), base_time + datetime.timedelta(hours=2), None),
         ]
         photos = duplicates + distinct_photos
 
@@ -234,7 +228,7 @@ class RankAllPhotosTests(SimpleTestCase):
     def _photos(self, photo_ids):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         return [
-            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i))
+            (photo_id, _load(photo_id), base_time + datetime.timedelta(hours=i), None)
             for i, photo_id in enumerate(photo_ids)
         ]
 
@@ -257,11 +251,11 @@ class RankAllPhotosTests(SimpleTestCase):
         base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
         image = _load(1001)
         duplicates = [
-            (1, image, base_time),
-            (2, image, base_time + datetime.timedelta(seconds=5)),
-            (3, image, base_time + datetime.timedelta(seconds=10)),
+            (1, image, base_time, None),
+            (2, image, base_time + datetime.timedelta(seconds=5), None),
+            (3, image, base_time + datetime.timedelta(seconds=10), None),
         ]
-        distinct_photo = (2001, _load(2001), base_time + datetime.timedelta(hours=1))
+        distinct_photo = (2001, _load(2001), base_time + datetime.timedelta(hours=1), None)
         photos = duplicates + [distinct_photo]
 
         taste_axes = {"brightness": 50, "vividness": 50, "tone": 50, "density": 50, "photo_type": 50}
@@ -366,3 +360,44 @@ class TravelAdapterTests(TestCase):
         self.assertIsNotNone(good_photo_1.taste_rank)
         self.assertIsNotNone(good_photo_2.taste_rank)
         self.assertEqual({good_photo_1.taste_rank, good_photo_2.taste_rank}, {1, 2})
+
+    @patch("recommendations.travel_adapter._download_image")
+    def test_rank_pin_photos_caches_measured_axes(self, mock_download):
+        """#104 — 최초 스코어링 시점에 실측값이 Photo에 저장돼야 재추천 때 재사용할 수 있다."""
+        mock_download.side_effect = lambda url: _load(int(url))
+        _set_taste_axes(self.user)
+        photo = self._create_photo(1001, datetime.datetime(2026, 8, 1, 9, 0, 0))
+
+        rank_pin_photos(self.pin)
+
+        photo.refresh_from_db()
+        expected = measure_all_axes(_load(1001))
+        self.assertAlmostEqual(photo.measured_brightness, expected["brightness"])
+        self.assertAlmostEqual(photo.measured_vividness, expected["vividness"])
+        self.assertAlmostEqual(photo.measured_tone, expected["tone"])
+        self.assertAlmostEqual(photo.measured_density, expected["density"])
+        self.assertAlmostEqual(photo.measured_photo_type, expected["photo_type"])
+
+    @patch("recommendations.travel_adapter.measure_all_axes")
+    @patch("recommendations.travel_adapter._download_image")
+    def test_refresh_reuses_cached_measured_axes_without_remeasuring(self, mock_download, mock_measure):
+        """#104 핵심 — 이미 measured_*가 채워진 사진은 재추천할 때 measure_all_axes를
+        다시 호출하지 않아야 한다(캐시 재사용). 사진 다운로드(_download_image) 자체는
+        유사사진 판별(pHash)에 여전히 필요해서 계속 호출된다."""
+        mock_download.side_effect = lambda url: _load(int(url))
+        mock_measure.return_value = {
+            "brightness": 60, "vividness": 60, "tone": 60, "density": 60, "photo_type": 60,
+        }
+        _set_taste_axes(self.user)
+        base_time = datetime.datetime(2026, 8, 1, 9, 0, 0)
+        for i, catalog_id in enumerate([1001, 1002, 2001, 2002, 3001]):
+            self._create_photo(catalog_id, base_time + datetime.timedelta(hours=i))
+
+        rank_pin_photos(self.pin)
+        self.assertEqual(mock_measure.call_count, 5)
+
+        mock_measure.reset_mock()
+        refresh_pin_photos(self.pin)
+
+        mock_measure.assert_not_called()
+        self.assertEqual(mock_download.call_count, 10)  # 최초 5회 + 재추천 5회, 다운로드는 매번 필요
