@@ -36,6 +36,7 @@ class PinCreateRequestSerializer(serializers.Serializer):
     place_name = serializers.CharField(required=False, allow_blank=True, max_length=150, default="")
     text_note = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=500)
     audio_file = serializers.CharField(required=False, allow_null=True)
+    duration_sec = serializers.IntegerField(required=False, default=0, min_value=0)
 
 
 class TripCreateRequestSerializer(serializers.Serializer):
