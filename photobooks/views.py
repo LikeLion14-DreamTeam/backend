@@ -144,6 +144,8 @@ def _photobook_detail_get(photobook):
     GET /photobooks/{photobookId} (6.2). 도시별 카드 구조 — 각 카드 안엔 포토북 생성 시점에
     확정된 핀 선정(PhotobookPin) + 핀별 사진 선정(PhotobookPhotoLayout) 결과를 그대로 보여줌
     + 지도/동선 렌더링에 쓰이도록 각 핀에 좌표도 포함
+    + 도시 카드마다 국가명(country_name)도 함께 내려줌(2026-08-19 추가) — 같은 도시로 묶인
+    핀들의 국가가 다를 수 있다는 가정은 하지 않고, 그룹의 첫 핀 값을 그대로 씀.
     """
     segment = photobook.segment
 
@@ -175,6 +177,7 @@ def _photobook_detail_get(photobook):
         city_results.append(
             {
                 "city": city,
+                "country_name": pps[0].pin.country_name,
                 "start_at": min(tagged_ats),
                 "end_at": max(tagged_ats),
                 "pin_count": len(pps),
