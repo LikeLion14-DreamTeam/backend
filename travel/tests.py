@@ -218,6 +218,93 @@ class PinPhotosRegisterRejectionTests(TestCase):
         )
         self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 50)
 
+    @patch("travel.views.resolve_and_consume")
+    def test_batch_size_exceeded_partially_rejects_over_15(self, mock_resolve):
+        mock_resolve.side_effect = lambda file_id, **kwargs: f"/uploads/{file_id}.jpg"
+
+        photos = [
+            {"file_id": f"file_{i}", "captured_at": "2026-08-01T09:00:00Z", "latitude": "37.5001", "longitude": "127.0001"}
+            for i in range(16)
+        ]
+        request = self.factory.post(
+            f"/pins/{self.pin.pin_id}/photos", {"photos": photos}, format="json", **_auth_headers(self.user)
+        )
+        response = pin_photos(request, self.pin.pin_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["added"]), 15)
+        self.assertEqual(
+            response.data["rejected"], [{"file_id": "file_15", "reason": "BATCH_SIZE_EXCEEDED"}]
+        )
+        self.assertEqual(Photo.objects.filter(pin=self.pin).count(), 15)
+
+    @patch("travel.views.resolve_and_consume")
+    def test_batch_size_checked_before_pin_total_limit(self, mock_resolve):
+        mock_resolve.side_effect = lambda file_id, **kwargs: f"/uploads/{file_id}.jpg"
+        for i in range(46):
+            Photo.objects.create(
+                pin=self.pin,
+                captured_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+                photo_url=f"https://example.com/{i}.jpg",
+            )
+
+        photos = [
+            {"file_id": f"file_{i}", "captured_at": "2026-08-01T09:00:00Z", "latitude": "37.5001", "longitude": "127.0001"}
+            for i in range(15)
+        ]
+        request = self.factory.post(
+            f"/pins/{self.pin.pin_id}/photos", {"photos": photos}, format="json", **_auth_headers(self.user)
+        )
+        response = pin_photos(request, self.pin.pin_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["added"]), 4)
+        self.assertTrue(
+            all(r["reason"] == "PHOTO_LIMIT_EXCEEDED" for r in response.data["rejected"])
+        )
+        self.assertEqual(len(response.data["rejected"]), 11)
+
+
+class PinPhotoRegisterEagerCachingTests(TestCase):
+    """사진 등록 시점 실측값 eager 캐싱 검증 (#110)."""
+
+    def setUp(self):
+        self.user = _make_user()
+        self.pin = Pin.objects.create(
+            user=self.user, tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc)
+        )
+        self.factory = APIRequestFactory()
+
+    def _post_photos(self, file_ids):
+        photos = [
+            {"file_id": file_id, "captured_at": "2026-08-01T09:00:00Z"} for file_id in file_ids
+        ]
+        request = self.factory.post(
+            f"/pins/{self.pin.pin_id}/photos", {"photos": photos}, format="json", **_auth_headers(self.user)
+        )
+        return pin_photos(request, self.pin.pin_id)
+
+    @patch("travel.views.resolve_and_consume")
+    @patch("recommendations.travel_adapter._download_image")
+    def test_photo_added_to_already_scored_pin_gets_measured_axes_cached(self, mock_download, mock_resolve):
+        mock_download.side_effect = lambda url: load_image(CATALOG_DIR / "1001.jpg")
+        mock_resolve.side_effect = lambda file_id, **kwargs: f"/media/{file_id}.jpg"
+        _set_taste_axes(self.user)
+
+        self._post_photos(["file_1"])  # 최초 등록 — rank_pin_photos가 캐싱까지 처리
+        first_photo = Photo.objects.get(pin=self.pin)
+        self.assertIsNotNone(first_photo.taste_rank)
+
+        self._post_photos(["file_2"])  # 이미 스코어링된 핀 — precompute_measured_axes 경로
+
+        new_photo = Photo.objects.exclude(pk=first_photo.pk).get(pin=self.pin)
+        self.assertIsNone(new_photo.taste_rank)
+        self.assertIsNotNone(new_photo.measured_brightness)
+        self.assertIsNotNone(new_photo.measured_vividness)
+        self.assertIsNotNone(new_photo.measured_tone)
+        self.assertIsNotNone(new_photo.measured_density)
+        self.assertIsNotNone(new_photo.measured_photo_type)
+
 
 class PinPhotosRefreshTests(TestCase):
     """5.6(대표사진 새로고침) 엔드포인트 검증 (#81)."""
