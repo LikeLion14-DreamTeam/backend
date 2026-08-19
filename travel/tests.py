@@ -472,7 +472,24 @@ class PinCreateViewTests(TestCase):
         self.assertEqual(response.status_code, 201)
         pin = Pin.objects.get(user=self.user)
         self.assertIsNotNone(response.json()["voice_memo"])
-        self.assertTrue(VoiceMemo.objects.filter(pin=pin).exists())
+        voice_memo = VoiceMemo.objects.get(pin=pin)
+        self.assertEqual(voice_memo.duration_sec, 0)
+
+    @patch("travel.views.resolve_and_consume")
+    def test_audio_file_with_duration_sec_stores_it(self, mock_resolve):
+        mock_resolve.return_value = "/media/voice1.mp3"
+
+        response = self.client.post(
+            self.url,
+            data={"audio_file": "token-1", "duration_sec": 12},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        pin = Pin.objects.get(user=self.user)
+        voice_memo = VoiceMemo.objects.get(pin=pin)
+        self.assertEqual(voice_memo.duration_sec, 12)
 
     @patch("travel.views.resolve_and_consume")
     def test_invalid_audio_file_returns_400_and_no_pin_created(self, mock_resolve):

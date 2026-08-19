@@ -199,7 +199,9 @@ def _pin_create(request):
             if audio_file:
                 relative_url = resolve_and_consume(audio_file, user=request.user, expected_file_type="voice")
                 voice_memo = VoiceMemo.objects.create(
-                    pin=pin, audio_url=request.build_absolute_uri(relative_url)
+                    pin=pin,
+                    audio_url=request.build_absolute_uri(relative_url),
+                    duration_sec=data.get("duration_sec", 0),
                 )
     except FILE_RESOLVE_EXCEPTIONS as exc:
 
