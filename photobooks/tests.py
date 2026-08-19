@@ -179,6 +179,7 @@ class PhotobookDetailGetViewTests(TestCase):
             segment=self.segment,
             included_in_segment=True,
             city="도쿄",
+            country_name="일본",
             tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
         )
         photo = Photo.objects.create(
@@ -197,6 +198,7 @@ class PhotobookDetailGetViewTests(TestCase):
         self.assertEqual(body["pin_count"], 1)
         self.assertEqual(len(body["cities"]), 1)
         self.assertEqual(body["cities"][0]["city"], "도쿄")
+        self.assertEqual(body["cities"][0]["country_name"], "일본")
         self.assertEqual(len(body["cities"][0]["pins"][0]["photos"]), 1)
 
 
