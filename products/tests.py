@@ -108,7 +108,7 @@ class ProductLinkViewTests(TestCase):
         response = self.client.patch(self._url("tag-1"))
         self.assertEqual(response.status_code, 401)
 
-    def test_new_tag_is_auto_registered_as_unknown(self):
+    def test_new_tag_is_auto_registered_with_mvp_default_product(self):
         response = self.client.patch(self._url("new-tag"), **_auth_headers(self.user))
 
         self.assertEqual(response.status_code, 200)
@@ -116,8 +116,8 @@ class ProductLinkViewTests(TestCase):
         self.assertEqual(body["tag_id"], "new-tag")
         self.assertEqual(body["user_id"], self.user.pk)
         tag = NfcTag.objects.get(pk="new-tag")
-        self.assertEqual(tag.product_type, "unknown")
-        self.assertIsNone(tag.product_name)
+        self.assertEqual(tag.product_type, "bag")
+        self.assertEqual(tag.product_name, "Ottomar 비세토스 위켄더")
 
     def test_relinking_own_previously_unlinked_tag(self):
         NfcTag.objects.create(

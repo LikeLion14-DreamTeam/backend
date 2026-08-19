@@ -7,9 +7,8 @@ class NfcTag(models.Model):
         ("bag", "가방"),
         ("charm", "참"),
         ("keyring", "키링"),
-        # 미등록 NFC 태그를 8.1 자동등록(7.5) 흐름에서 만들 때 쓴다 — 실제 제품 정보를
-        # 알 방법이 없어 일단 미확인 상태로 등록해둔다 (API 명세서 7.4 응답 예시:
-        # "product_type": "unknown", "product_name": null). docs/IMPLEMENTATION.md 참고.
+        # 실제 제품 카탈로그 연동 전까지는 8.1 자동등록 시 쓰지 않음(MVP 하드코딩 기본값으로
+        # 대체, docs/IMPLEMENTATION.md 참고). 과거 데이터 호환을 위해 choice는 유지.
         ("unknown", "미확인"),
     ]
 

@@ -65,7 +65,8 @@ def product_link(request, tag_id):
     PATCH /products/{tagId}/link — 태그 자동 등록/연결 (8.1)
     """
     tag, created = NfcTag.objects.get_or_create(
-        pk=tag_id, defaults={"user": request.user, "product_type": "unknown", "product_name": None}
+        pk=tag_id,
+        defaults={"user": request.user, "product_type": "bag", "product_name": "Ottomar 비세토스 위켄더"},
     )
 
     if not created:

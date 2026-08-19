@@ -13,6 +13,18 @@
 
 ## 결정 로그
 
+### 2026-08-19 — [products] 8.1 자동등록 태그의 기본 제품 정보를 MVP용으로 하드코딩
+- **결정**: `product_link`(8.1, 미등록 NFC 태그 최초 태깅 시 자동등록)에서 신규 태그의
+  기본값을 `product_type="unknown"`/`product_name=None`에서 `product_type="bag"`/
+  `product_name="Ottomar 비세토스 위켄더"`로 고정.
+- **이유**: 실제 제품 카탈로그 연동 전까지, 태깅 시 "미확인 제품"으로 뜨는 게 MVP 데모/사용
+  경험상 부적절하다는 판단(사용자 확인). `NfcTag.PRODUCT_TYPE_CHOICES`의 `unknown` choice
+  자체는 과거 데이터 호환을 위해 스키마에 유지.
+- **영향 범위**: `products/views.py`(`product_link`), `products/tests.py`
+  (`test_new_tag_is_auto_registered_as_unknown` → 기대값 변경),
+  `products/models.py`(주석 정리). 모델/마이그레이션 변경 없음.
+- **TODO**: 실제 제품 카탈로그(태그별 실제 제품 매핑) 연동 시 이 하드코딩을 제거해야 함.
+
 ### 2026-08-17 — [taste] 온보딩 이전 라운드 재제출(답변 수정) 허용 + 진행 상태 조회 API 신설
 - **결정**:
   1. `submit_basic_question_response`/`submit_selection_photo`가 지금까지는 `round_no`가
