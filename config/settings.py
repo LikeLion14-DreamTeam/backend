@@ -168,7 +168,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://daewangkimchimandu.vercel.app",
+    "https://orte-archive.vercel.app",
 ]
 
 ### AWS (S3 presigned URL 업로드용) ###
