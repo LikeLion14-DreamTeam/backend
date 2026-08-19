@@ -69,12 +69,10 @@ def product_link(request, tag_id):
         defaults={"user": request.user, "product_type": "bag", "product_name": "Ottomar 비세토스 위켄더"},
     )
 
+    # TODO(demo): 시연 기간 동안 하나의 NFC 태그로 여러 계정이 반복 시연해야 해서, 다른
+    # 계정에 이미 연결된 태그라도 태깅한 계정으로 소유권을 즉시 넘기도록 8.1의 409 CONFLICT
+    # 보호를 임시로 비활성화함. 시연 종료 후 원복 필요.
     if not created:
-        if tag.user_id is not None and tag.user_id != request.user.user_id and tag.unlinked_at is None:
-            return Response(
-                {"message": "이미 다른 계정에 등록된 태그입니다.", "code": "CONFLICT"},
-                status=status.HTTP_409_CONFLICT,
-            )
         if tag.user_id != request.user.user_id or tag.unlinked_at is not None:
             tag.user = request.user
             tag.unlinked_at = None

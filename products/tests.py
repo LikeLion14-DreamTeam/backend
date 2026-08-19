@@ -139,14 +139,17 @@ class ProductLinkViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user_id"], self.user.pk)
 
-    def test_tag_owned_by_another_active_user_returns_409(self):
+    def test_tag_owned_by_another_active_user_is_transferred(self):
+        # 시연 기간 임시 동작(TODO(demo), products/views.py 참고): 원래는 409 CONFLICT였으나
+        # 하나의 태그로 여러 계정이 반복 시연할 수 있도록 소유권을 즉시 넘기게 바뀜.
         other_user = _make_user()
         NfcTag.objects.create(tag_id="tag-1", user=other_user, product_type="bag")
 
         response = self.client.patch(self._url("tag-1"), **_auth_headers(self.user))
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["code"], "CONFLICT")
+        self.assertEqual(response.status_code, 200)
+        tag = NfcTag.objects.get(pk="tag-1")
+        self.assertEqual(tag.user_id, self.user.pk)
 
     def test_tag_previously_unlinked_from_another_user_can_be_relinked(self):
         other_user = _make_user()

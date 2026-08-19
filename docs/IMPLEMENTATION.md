@@ -13,6 +13,21 @@
 
 ## 결정 로그
 
+### 2026-08-19 — [products] 8.1 태그 연결 시 다른 계정 소유 충돌(409) 임시 비활성화 (시연용)
+- **결정**: `product_link`(8.1)에서 태그가 이미 다른 계정에 연결돼 있을 때 409 CONFLICT를
+  반환하던 보호 로직을 제거. 이제 어느 계정이든 태깅하면 그 태그의 소유권이 즉시 현재
+  계정으로 넘어감(기존 소유자의 명시적 해제 없이도).
+- **이유**: 시연 기간 동안 물리 NFC 태그 1개로 여러 계정이 반복해서 시연해야 하는데, 매번
+  이전 계정에서 `PATCH /products/{tagId}/unlink`(7.2)로 먼저 해제해야 하는 게 시연 흐름을
+  막음(사용자 확인).
+- **주의(TODO)**: 이건 8.1 명세에 있던 실제 보호장치를 없애는 것이라, 시연이 끝나면
+  `products/views.py`의 `product_link`에서 이 TODO(demo) 주석 부분을 원래 409 CONFLICT
+  분기로 되돌려야 함. 이대로 두면 실제 서비스에서도 아무나 태깅 한 번으로 남의 등록된
+  제품을 가로챌 수 있음.
+- **영향 범위**: `products/views.py`(`product_link`), `products/tests.py`
+  (`test_tag_owned_by_another_active_user_returns_409` →
+  `test_tag_owned_by_another_active_user_is_transferred`로 기대값 변경).
+
 ### 2026-08-19 — [products] 8.1 자동등록 태그의 기본 제품 정보를 MVP용으로 하드코딩
 - **결정**: `product_link`(8.1, 미등록 NFC 태그 최초 태깅 시 자동등록)에서 신규 태그의
   기본값을 `product_type="unknown"`/`product_name=None`에서 `product_type="bag"`/
