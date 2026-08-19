@@ -37,7 +37,7 @@ SECRET_KEY = get_secret("SECRET_KEY")
 # 실질적 위험이 있다고 판단해 끈다. (2026-08-19)
 DEBUG = secrets.get("DEBUG", True)
 
-ALLOWED_HOSTS = ['52.79.135.193', 'localhost', '127.0.0.1', '.trycloudflare.com']
+ALLOWED_HOSTS = ['52.79.135.193', 'localhost', '127.0.0.1', '.trycloudflare.com','orte.p-e.kr']
 
 
 # Application definition
