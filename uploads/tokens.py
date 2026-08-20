@@ -9,7 +9,7 @@ import pillow_heif
 from botocore.exceptions import ClientError
 from django.conf import settings
 from django.core import signing
-from PIL import Image
+from PIL import Image, ImageOps, ImageOps
 
 # OpenCV(cv2.imdecode)가 HEIC/HEIF를 디코딩 못 해 recommendations 스코어링이 그대로
 # 죽고(#102), 브라우저도 HEIC를 직접 렌더링 못 한다. 등록 시점(resolve_and_consume)에
@@ -151,7 +151,14 @@ def resolve_and_consume(token, *, user, expected_file_type, max_age=MAX_AGE_SECO
         pending_bytes = s3.get_object(Bucket=bucket, Key=pending)["Body"].read()
         jpeg_buffer = io.BytesIO()
         with Image.open(io.BytesIO(pending_bytes)) as image:
-            image.convert("RGB").save(jpeg_buffer, format="JPEG", quality=90)
+            # HEIC의 EXIF Orientation을 그냥 두면 화면 표시/CV 분석 양쪽에서 무시된다
+            # (브라우저 img 태그는 존중하지만 cv2.imdecode는 orientation을 안 봄) — 픽셀
+            # 자체를 회전/반전시켜서 저장해야 어디서 열어도 항상 올바르게 보인다.
+            # exif_transpose가 회전을 픽셀에 반영한 새 이미지를 반환하므로, 그 결과를
+            # JPEG로 저장하면 Orientation 태그 없이도 항상 올바른 방향으로 보인다.
+            # (2026-08-20, 프론트 리포트로 발견 — docs/IMPLEMENTATION.md 참고)
+            transposed = ImageOps.exif_transpose(image)
+            transposed.convert("RGB").save(jpeg_buffer, format="JPEG", quality=90)
         s3.put_object(
             Bucket=bucket, Key=consumed_key, Body=jpeg_buffer.getvalue(), ContentType="image/jpeg"
         )

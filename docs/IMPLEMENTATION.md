@@ -1542,6 +1542,27 @@
 
 ---
 
+### 2026-08-20 — HEIC→JPEG 변환 시 EXIF Orientation 픽셀 반영
+- **결정**: `uploads/tokens.py`의 `resolve_and_consume` HEIC 변환 경로에서, `convert("RGB")`
+  전에 `PIL.ImageOps.exif_transpose(image)`를 먼저 적용한다. 회전/반전을 실제 픽셀에
+  반영한 이미지를 저장하므로, 결과 JPEG는 Orientation 태그 없이도(애초에 `.save()`가
+  EXIF를 다시 넣어주지 않아 태그 자체가 사라짐 — "1로 정규화"와 동일한 효과) 항상 올바른
+  방향으로 보인다.
+- **이유**: 기존 코드는 HEIC를 열어서 그대로 RGB 변환 후 저장만 했다 — Orientation 태그를
+  픽셀에 반영하지 않았고, 저장 시 EXIF 자체도 사라졌다(직접 재현 테스트로 확인: 크기가
+  회전 전과 동일하게 유지됨 = 미반영, 저장 후 exif 빈 dict = 유실). HEIC는 아이폰 기본
+  촬영 포맷이라, 세로로 찍은 사진 대부분이 영향을 받아 화면에 눕거나 거꾸로 표시될 수 있는
+  실사용 버그였다(프론트 리포트로 발견). `taste/photo_measurement.py`(CV 스코어링)는 이미
+  변환·저장된 파일(픽셀)을 그대로 다운로드해 분석하는 구조라 별도 수정 없이 자동으로 보정된
+  픽셀 기준으로 분석된다. 일반 JPEG 등 원본 그대로 복사되는 경로(`copy_object`)는 이
+  분기(`is_heic`) 밖이라 영향받지 않는다.
+- **영향 범위**: `uploads/tokens.py`(`resolve_and_consume`), `uploads/tests.py`.
+- **미확정**: 원본 그대로 복사되는 일반 JPEG 경로도 EXIF Orientation이 있는 파일이면
+  뷰어/CV 분석 쪽에서 동일한 종류의 문제가 있을 수 있으나(`cv2.imdecode`는 orientation을
+  안 봄), 이번 리포트가 HEIC 한정이라 스코프 밖으로 남겨둠. 필요해지면 별도 확인.
+
+---
+
 ## 템플릿 (새 결정 추가 시 아래 형식 복사해서 사용)
 
 ```
