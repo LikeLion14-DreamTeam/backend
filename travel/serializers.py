@@ -37,6 +37,9 @@ class PinCreateRequestSerializer(serializers.Serializer):
     text_note = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=500)
     audio_file = serializers.CharField(required=False, allow_null=True)
     duration_sec = serializers.IntegerField(required=False, default=0, min_value=0)
+    # 프론트가 촬영/태깅 시점의 디바이스 시각을 보내면 그대로 신뢰해서 저장한다(서버 검증
+    # 없음). 안 보내면 기존처럼 서버 수신 시각으로 폴백 — 하위호환. docs/IMPLEMENTATION.md 참고.
+    tagged_at = serializers.DateTimeField(required=False, allow_null=True)
 
 
 class TripCreateRequestSerializer(serializers.Serializer):

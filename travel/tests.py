@@ -392,6 +392,29 @@ class PinCreateViewTests(TestCase):
         self.assertEqual(Pin.objects.filter(user=self.user).count(), 1)
         self.assertIsNone(response.json()["segment_id"])
 
+    def test_tagged_at_input_is_saved_verbatim(self):
+        response = self.client.post(
+            self.url,
+            data={"tagged_at": "2026-01-01T09:00:00Z"},
+            content_type="application/json",
+            **_auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        pin = Pin.objects.get(user=self.user)
+        self.assertEqual(pin.tagged_at.isoformat(), "2026-01-01T09:00:00+00:00")
+
+    def test_missing_tagged_at_falls_back_to_server_time(self):
+        before = timezone_now()
+        response = self.client.post(
+            self.url, data={}, content_type="application/json", **_auth_headers(self.user)
+        )
+        after = timezone_now()
+
+        self.assertEqual(response.status_code, 201)
+        pin = Pin.objects.get(user=self.user)
+        self.assertTrue(before <= pin.tagged_at <= after)
+
     def test_country_name_creates_country_stamp(self):
         response = self.client.post(
             self.url,
@@ -957,6 +980,46 @@ class TripPinsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["pins"]), 1)
+
+    def test_lists_pins_ordered_by_tagged_at_not_creation_order(self):
+        # pin_id 생성 순서와 tagged_at 순서가 어긋나는 상황(예: 과거 시점 태깅) 재현
+        later = Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 5, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+        )
+        earlier = Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+        )
+
+        response = self.client.get(self._url(), **_auth_headers(self.user))
+
+        self.assertEqual(response.status_code, 200)
+        pin_ids = [p["pin_id"] for p in response.json()["pins"]]
+        self.assertEqual(pin_ids, [earlier.pin_id, later.pin_id])
+
+    def test_cursor_pagination_follows_tagged_at_order(self):
+        later = Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 5, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+        )
+        earlier = Pin.objects.create(
+            user=self.user,
+            tagged_at=datetime.datetime(2026, 8, 1, 9, 0, 0, tzinfo=datetime.timezone.utc),
+            segment=self.segment,
+        )
+
+        first_page = self.client.get(self._url() + "?limit=1", **_auth_headers(self.user))
+        self.assertEqual([p["pin_id"] for p in first_page.json()["pins"]], [earlier.pin_id])
+
+        cursor = first_page.json()["next_cursor"]
+        second_page = self.client.get(
+            self._url() + f"?limit=1&cursor={cursor}", **_auth_headers(self.user)
+        )
+        self.assertEqual([p["pin_id"] for p in second_page.json()["pins"]], [later.pin_id])
 
 
 class PinPhotosListViewTests(TestCase):

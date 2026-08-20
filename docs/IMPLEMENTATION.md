@@ -13,6 +13,23 @@
 
 ## 결정 로그
 
+### 2026-08-19 — [travel] POST /pins가 tagged_at을 입력값으로 받도록 변경
+- **결정**: `PinCreateRequestSerializer`에 `tagged_at`(선택, 없으면 서버 시각 폴백) 필드를
+  추가하고, `_pin_create`가 `timezone.now()` 대신 이 값을 우선 사용하도록 변경.
+  `GET /trips/{segmentId}/pins`, `GET /trips/current/pins`의 커서 페이지네이션 정렬 기준도
+  `pin_id`에서 `tagged_at`(동률 시 `pin_id`로 tie-break)으로 변경 — 지금까지는 `tagged_at`이
+  항상 서버 수신 시각이라 `pin_id` 순 ≈ `tagged_at` 순이었지만, 입력값을 받기 시작하면
+  둘이 어긋날 수 있어서 커서 필터도 `(tagged_at, pin_id)` 복합 비교로 바꿨다. 커서
+  파라미터 자체의 형식(pin_id 문자열)은 유지.
+- **이유**: 프론트 요청 — `tagged_at`을 `localStorage`에만 들고 있어서 기기/브라우저가
+  바뀌면 값이 사라지고, 여정 생성/공유/포토북처럼 서버 데이터를 쓰는 화면과 시간 기준이
+  달라지는 문제. 서버가 정답 소스가 되도록 요청받음.
+- **신뢰 경계**: 서버는 프론트가 보낸 `tagged_at`을 검증하지 않는다(범위/미래 시각 체크
+  없음) — 디바이스 시계가 틀리면 그대로 반영됨. 필요해지면 별도로 검증 규칙을 정한다.
+- **영향 범위**: `travel/serializers.py`(`PinCreateRequestSerializer`),
+  `travel/views.py`(`_pin_create`, `trip_current_pins`, `trip_pins`), `travel/tests.py`.
+  요청 스키마 변경이라 `docs/API_CHANGES.md`에도 기록.
+
 ### 2026-08-19 — [products] 8.1 태그 연결 시 다른 계정 소유 충돌(409) 임시 비활성화 (시연용)
 - **결정**: `product_link`(8.1)에서 태그가 이미 다른 계정에 연결돼 있을 때 409 CONFLICT를
   반환하던 보호 로직을 제거. 이제 어느 계정이든 태깅하면 그 태그의 소유권이 즉시 현재

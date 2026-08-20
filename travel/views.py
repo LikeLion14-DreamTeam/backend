@@ -2,7 +2,7 @@ import logging
 
 from django.core import signing
 from django.db import transaction
-from django.db.models import Count, F, Min
+from django.db.models import Count, F, Min, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -181,7 +181,7 @@ def _pin_create(request):
                 country_name=country_name,
                 country_code=country_code,
                 place_name=data.get("place_name", ""),
-                tagged_at=timezone.now(),
+                tagged_at=data.get("tagged_at") or timezone.now(),
                 text_note=data.get("text_note"),
             )
 
@@ -315,10 +315,15 @@ def trip_current_pins(request):
     qs = (
         Pin.objects.filter(user=request.user, segment__isnull=True)
         .annotate(photo_count=Count("photos"))
-        .order_by("pin_id")
+        .order_by("tagged_at", "pin_id")
     )
     if cursor_id is not None:
-        qs = qs.filter(pin_id__gt=cursor_id)
+        cursor_pin = Pin.objects.filter(pk=cursor_id).values("tagged_at").first()
+        if cursor_pin:
+            qs = qs.filter(
+                Q(tagged_at__gt=cursor_pin["tagged_at"])
+                | Q(tagged_at=cursor_pin["tagged_at"], pin_id__gt=cursor_id)
+            )
 
     pins = list(qs[: limit + 1])
     next_cursor = None
@@ -701,10 +706,15 @@ def trip_pins(request, segment_id):
     qs = (
         Pin.objects.filter(segment_id=segment_id, user=request.user)
         .annotate(photo_count=Count("photos"))
-        .order_by("pin_id")
+        .order_by("tagged_at", "pin_id")
     )
     if cursor_id is not None:
-        qs = qs.filter(pin_id__gt=cursor_id)
+        cursor_pin = Pin.objects.filter(pk=cursor_id).values("tagged_at").first()
+        if cursor_pin:
+            qs = qs.filter(
+                Q(tagged_at__gt=cursor_pin["tagged_at"])
+                | Q(tagged_at=cursor_pin["tagged_at"], pin_id__gt=cursor_id)
+            )
 
     pins = list(qs[: limit + 1])
     next_cursor = None
