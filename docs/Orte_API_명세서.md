@@ -690,7 +690,8 @@ Body
     "city": "도쿄", "country_name": "일본", "country_code": "JP",
     "place_name": "",
     "text_note": "노을이 예뻤다",
-    "audio_file": "https://cdn.orte.app/voices/55.m4a"
+    "audio_file": "https://cdn.orte.app/voices/55.m4a",
+    "duration_sec": 12
 }
 ```
 `city`/`country_name`/`country_code`는 전부 선택 필드다. `country_code`(ISO 3166-1 alpha-2, 예: `"KR"`)는
@@ -712,6 +713,7 @@ Response
 - `nfc_tag_id`는 선택 값이다. NFC 태깅 없이(여행 계속하기, 지도에서 수동 입력) 생성할 때는 생략한다. 다만 위치·시간과 무관하게 매 태깅마다 새 핀이 생성되는 규칙이므로 "같은 핀에 이어서 촬영"이라는 흐름은 없다 — 새로 태깅하면 항상 새 핀이다.
 - `address`는 프론트가 좌표를 역지오코딩해서 채운다(자동). `place_name`은 사용자가 그 자리에서 입력하지 않으면 빈 문자열.
 - `audio_file`은 이 시점에만 등록 가능하며 원본 음성만 저장한다(텍스트 변환 없음). 이후에는 5.8로 조회만 되고 수정·삭제 API는 없다.
+- `duration_sec`은 선택 필드(정수, 초 단위, 기본값 0)로 `audio_file`과 함께 보낸다. 녹음 시작~종료 시각으로 직접 계산해서 보낼 것 — 녹음 직후 파일(blob)에서 `duration`을 읽으면 브라우저에 따라 `Infinity`/`NaN`이 나올 수 있어 권장하지 않는다.
 - 촬영한 사진들은 핀 생성 후 **5.5 사진 등록**으로 별도 첨부한다.
 - 텍스트 기록만 나중에 고치고 싶다면 **5.2 핀 정보 수정**을 사용한다.
 
