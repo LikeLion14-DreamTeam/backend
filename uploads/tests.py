@@ -108,6 +108,19 @@ def _fake_image_bytes():
     return buf.getvalue()
 
 
+def _fake_oriented_image_bytes(width=12, height=8, orientation=None):
+    """EXIF Orientation 태그가 박힌 이미지 바이트. orientation=None이면 태그 없이."""
+    image = Image.new("RGB", (width, height), color=(200, 50, 50))
+    buf = io.BytesIO()
+    if orientation is not None:
+        exif = image.getexif()
+        exif[0x0112] = orientation  # Orientation 태그
+        image.save(buf, format="JPEG", exif=exif)
+    else:
+        image.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
 class ResolveAndConsumeHeicConversionTests(TestCase):
     """#102 — HEIC/HEIF 업로드는 resolve_and_consume에서 JPEG로 변환돼야 한다.
 
@@ -138,6 +151,44 @@ class ResolveAndConsumeHeicConversionTests(TestCase):
         mock_s3.delete_object.assert_called_once_with(
             Bucket=mock_s3.put_object.call_args.kwargs["Bucket"], Key="uploads/pending/abc123.heic"
         )
+
+    @patch("uploads.tokens._s3_client")
+    def test_heic_orientation_6_is_applied_to_pixels_and_stripped_from_output(self, mock_client_factory):
+        """EXIF Orientation=6(시계방향 90도 회전 필요)이면 저장 결과의 실제 픽셀 크기가
+        가로세로 뒤바뀌어야 하고(회전이 반영됐다는 뜻), 저장 결과엔 Orientation 태그가
+        남아있지 않아야 한다(1로 정규화 = 태그 자체가 없어도 이미 올바른 방향이므로 불필요)."""
+        mock_s3 = MagicMock()
+        mock_client_factory.return_value = mock_s3
+        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "uploads/pending/rot6.heic"}]}
+        mock_s3.head_object.side_effect = _not_found_error("HeadObject")
+        mock_s3.get_object.return_value = {
+            "Body": io.BytesIO(_fake_oriented_image_bytes(width=12, height=8, orientation=6))
+        }
+
+        token, _uid = issue_file_token(self.user, "photo", "image/heic")
+        resolve_and_consume(token, user=self.user, expected_file_type="photo")
+
+        saved_bytes = mock_s3.put_object.call_args.kwargs["Body"]
+        result = Image.open(io.BytesIO(saved_bytes))
+        self.assertEqual(result.size, (8, 12))  # 12x8 → 90도 회전 반영되어 8x12로 뒤바뀜
+        self.assertNotIn(0x0112, result.getexif())
+
+    @patch("uploads.tokens._s3_client")
+    def test_heic_without_orientation_tag_keeps_original_dimensions(self, mock_client_factory):
+        mock_s3 = MagicMock()
+        mock_client_factory.return_value = mock_s3
+        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "uploads/pending/noexif.heic"}]}
+        mock_s3.head_object.side_effect = _not_found_error("HeadObject")
+        mock_s3.get_object.return_value = {
+            "Body": io.BytesIO(_fake_oriented_image_bytes(width=12, height=8, orientation=None))
+        }
+
+        token, _uid = issue_file_token(self.user, "photo", "image/heic")
+        resolve_and_consume(token, user=self.user, expected_file_type="photo")
+
+        saved_bytes = mock_s3.put_object.call_args.kwargs["Body"]
+        result = Image.open(io.BytesIO(saved_bytes))
+        self.assertEqual(result.size, (12, 8))  # orientation 없으면 그대로
 
     @patch("uploads.tokens._s3_client")
     def test_non_heic_content_type_still_uses_fast_copy_path(self, mock_client_factory):
